@@ -9,10 +9,13 @@ import (
 	"nezha_sec/internal/api"
 	"nezha_sec/internal/orchestrator"
 	"nezha_sec/internal/registry"
+	"nezha_sec/internal/views"
 	"os"
 	"regexp"
 	"strings"
 	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func processOutput() {
@@ -77,8 +80,10 @@ func processOutput() {
 func main() {
 	var targetURL string
 	var processMode bool
+	var mcpMode bool
 	flag.StringVar(&targetURL, "u", "", "目标 URL 或 IP 地址")
 	flag.BoolVar(&processMode, "process", false, "处理输出模式")
+	flag.BoolVar(&mcpMode, "mcp", false, "使用 MCP 风格界面")
 	flag.Parse()
 
 	if processMode {
@@ -88,9 +93,24 @@ func main() {
 	}
 
 	if targetURL == "" {
-		fmt.Println("请使用 -u 参数指定目标 URL 或 IP 地址")
-		fmt.Println("例如: ./nezha_sec -u https://example.com")
-		return
+		if mcpMode {
+			model, err := views.NewMCPModel()
+			if err != nil {
+				log.Fatalf("初始化 MCP 模型失败: %v", err)
+			}
+
+			p := tea.NewProgram(model)
+
+			if err := p.Start(); err != nil {
+				log.Fatalf("启动程序失败: %v", err)
+			}
+			return
+		} else {
+			fmt.Println("请使用 -u 参数指定目标 URL 或 IP 地址")
+			fmt.Println("例如: ./nezha_sec -u https://example.com")
+			fmt.Println("或使用 -mcp 参数启动 MCP 风格界面")
+			return
+		}
 	}
 
 	log.Println("初始化应用...")
