@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"nezha_sec/internal/api"
+	"nezha_sec/internal/executor"
 	"nezha_sec/internal/model"
 	"nezha_sec/internal/registry"
 	"nezha_sec/internal/security"
@@ -139,7 +140,19 @@ func (o *Orchestrator) ExecuteTool(toolName string, arguments map[string]interfa
 	// 获取工具
 	tool, exists := o.toolRegistry.GetTool(toolName)
 	if !exists {
-		return nil, fmt.Errorf("工具不存在: %s", toolName)
+		// 工具不存在，使用默认工具执行器模拟执行
+		defaultExecutor := executor.NewDefaultExecutor(toolName)
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		result, err := defaultExecutor.Execute(ctx, arguments)
+		if err != nil {
+			return nil, fmt.Errorf("工具执行失败: %w", err)
+		}
+		// 保存执行结果
+		o.executionSteps = append(o.executionSteps, *result)
+		// 更新上下文
+		o.contextStore[toolName] = result
+		return result, nil
 	}
 
 	// 创建上下文

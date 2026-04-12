@@ -44,44 +44,85 @@ type (
 
 // 解析AI响应中的工具调用
 func parseToolCalls(response string) []api.ToolCallMsg {
-	// 查找tool_calls部分
+	// 初始化工具调用列表
+	var toolCalls []api.ToolCallMsg
+
+	// 尝试多种格式解析工具调用
+	// 格式1: tool_calls = [{"tool_name": "...", "arguments": {...}}]
 	toolCallsRegex := regexp.MustCompile(`tool_calls\s*=\s*\[(.*?)\]`)
 	matches := toolCallsRegex.FindStringSubmatch(response)
-	if len(matches) < 2 {
-		// 尝试另一种格式
-		altRegex := regexp.MustCompile(`工具调用列表\s*:\s*\[(.*?)\]`)
-		matches = altRegex.FindStringSubmatch(response)
-		if len(matches) < 2 {
-			return []api.ToolCallMsg{}
+	if len(matches) >= 2 {
+		toolCallsJSON := "[" + matches[1] + "]"
+		var parsedCalls []api.ToolCallMsg
+		if err := json.Unmarshal([]byte(toolCallsJSON), &parsedCalls); err == nil {
+			return parsedCalls
 		}
 	}
 
-	// 提取工具调用JSON
-	toolCallsJSON := "[" + matches[1] + "]"
+	// 格式2: 工具调用列表: [{"tool_name": "...", "arguments": {...}}]
+	altRegex := regexp.MustCompile(`工具调用列表\s*:\s*\[(.*?)\]`)
+	matches = altRegex.FindStringSubmatch(response)
+	if len(matches) >= 2 {
+		toolCallsJSON := "[" + matches[1] + "]"
+		var parsedCalls []api.ToolCallMsg
+		if err := json.Unmarshal([]byte(toolCallsJSON), &parsedCalls); err == nil {
+			return parsedCalls
+		}
+	}
 
-	// 解析JSON
-	var toolCalls []api.ToolCallMsg
-	err := json.Unmarshal([]byte(toolCallsJSON), &toolCalls)
-	if err != nil {
-		// 尝试解析单个工具调用
-		singleToolRegex := regexp.MustCompile(`-\s*` + "`" + `(\w+)` + "`" + `.*?\{([^}]+)\}`)
-		singleMatches := singleToolRegex.FindAllStringSubmatch(response, -1)
-		for _, match := range singleMatches {
-			if len(match) >= 3 {
-				toolName := match[1]
-				argsStr := "{" + match[2] + "}"
+	// 格式3: 工具调用: 工具名称 {参数}
+	singleToolRegex := regexp.MustCompile(`工具调用:\s*(\w+)\s*\{([^}]+)\}`)
+	singleMatches := singleToolRegex.FindAllStringSubmatch(response, -1)
+	for _, match := range singleMatches {
+		if len(match) >= 3 {
+			toolName := match[1]
+			argsStr := "{" + match[2] + "}"
 
-				// 清理argsStr
-				argsStr = strings.ReplaceAll(argsStr, "url", "\"url\"")
-				argsStr = strings.ReplaceAll(argsStr, "=", ":")
-				argsStr = strings.ReplaceAll(argsStr, "https://", "\"https://")
-				argsStr = strings.ReplaceAll(argsStr, "http://", "\"http://")
-				argsStr = strings.ReplaceAll(argsStr, "", "\"")
-				argsStr = strings.ReplaceAll(argsStr, ", ", ", ")
+			// 清理argsStr
+			argsStr = strings.ReplaceAll(argsStr, "url", "\"url\"")
+			argsStr = strings.ReplaceAll(argsStr, "=", ":")
+			argsStr = strings.ReplaceAll(argsStr, "https://", "\"https://")
+			argsStr = strings.ReplaceAll(argsStr, "http://", "\"http://")
+			argsStr = strings.ReplaceAll(argsStr, "", "\"")
+			argsStr = strings.ReplaceAll(argsStr, ", ", ", ")
 
-				var args map[string]interface{}
-				err := json.Unmarshal([]byte(argsStr), &args)
-				if err == nil {
+			var args map[string]interface{}
+			if err := json.Unmarshal([]byte(argsStr), &args); err == nil {
+				toolCalls = append(toolCalls, api.ToolCallMsg{
+					ToolName:  toolName,
+					Arguments: args,
+				})
+			}
+		}
+	}
+
+	// 格式4: - 工具名称 {参数}
+	listToolRegex := regexp.MustCompile(`-\s*(\w+)\s*\{([^}]+)\}`)
+	listMatches := listToolRegex.FindAllStringSubmatch(response, -1)
+	for _, match := range listMatches {
+		if len(match) >= 3 {
+			toolName := match[1]
+			argsStr := "{" + match[2] + "}"
+
+			// 清理argsStr
+			argsStr = strings.ReplaceAll(argsStr, "url", "\"url\"")
+			argsStr = strings.ReplaceAll(argsStr, "=", ":")
+			argsStr = strings.ReplaceAll(argsStr, "https://", "\"https://")
+			argsStr = strings.ReplaceAll(argsStr, "http://", "\"http://")
+			argsStr = strings.ReplaceAll(argsStr, "", "\"")
+			argsStr = strings.ReplaceAll(argsStr, ", ", ", ")
+
+			var args map[string]interface{}
+			if err := json.Unmarshal([]byte(argsStr), &args); err == nil {
+				// 检查是否已经添加过相同的工具调用
+				exists := false
+				for _, existingCall := range toolCalls {
+					if existingCall.ToolName == toolName {
+						exists = true
+						break
+					}
+				}
+				if !exists {
 					toolCalls = append(toolCalls, api.ToolCallMsg{
 						ToolName:  toolName,
 						Arguments: args,
@@ -89,7 +130,79 @@ func parseToolCalls(response string) []api.ToolCallMsg {
 				}
 			}
 		}
-		return toolCalls
+	}
+
+	// 格式5: 工具名称: run_* 格式
+	runToolRegex := regexp.MustCompile(`工具名称:\s*run_(\w+)`)
+	runMatches := runToolRegex.FindAllStringSubmatch(response, -1)
+	for _, match := range runMatches {
+		if len(match) >= 2 {
+			toolName := "run_" + match[1]
+			// 为工具创建默认参数
+			args := make(map[string]interface{})
+			// 尝试从响应中提取参数
+			paramRegex := regexp.MustCompile(`参数:\s*\{([^}]+)\}`)
+			paramMatches := paramRegex.FindStringSubmatch(response)
+			if len(paramMatches) >= 2 {
+				paramStr := "{" + paramMatches[1] + "}"
+				// 清理paramStr
+				paramStr = strings.ReplaceAll(paramStr, "target", "\"target\"")
+				paramStr = strings.ReplaceAll(paramStr, "ports", "\"ports\"")
+				paramStr = strings.ReplaceAll(paramStr, "scan_type", "\"scan_type\"")
+				paramStr = strings.ReplaceAll(paramStr, "=", ":")
+				paramStr = strings.ReplaceAll(paramStr, "https://", "\"https://")
+				paramStr = strings.ReplaceAll(paramStr, "http://", "\"http://")
+				paramStr = strings.ReplaceAll(paramStr, "", "\"")
+				paramStr = strings.ReplaceAll(paramStr, ", ", ", ")
+
+				var paramArgs map[string]interface{}
+				if err := json.Unmarshal([]byte(paramStr), &paramArgs); err == nil {
+					args = paramArgs
+				}
+			}
+			// 检查是否已经添加过相同的工具调用
+			exists := false
+			for _, existingCall := range toolCalls {
+				if existingCall.ToolName == toolName {
+					exists = true
+					break
+				}
+			}
+			if !exists {
+				toolCalls = append(toolCalls, api.ToolCallMsg{
+					ToolName:  toolName,
+					Arguments: args,
+				})
+			}
+		}
+	}
+
+	// 如果没有解析到工具调用，尝试从响应中提取常见工具名称
+	if len(toolCalls) == 0 {
+		// 常见工具名称列表
+		commonTools := []string{"curl", "nmap", "sqlmap", "gobuster", "whatweb", "wpscan"}
+		for _, tool := range commonTools {
+			if strings.Contains(response, tool) {
+				// 为常见工具创建默认参数
+				args := make(map[string]interface{})
+				// 这里可以根据工具类型设置默认参数
+				toolCalls = append(toolCalls, api.ToolCallMsg{
+					ToolName:  tool,
+					Arguments: args,
+				})
+			}
+		}
+	}
+
+	// 如果仍然没有解析到工具调用，创建默认的工具调用
+	if len(toolCalls) == 0 {
+		// 创建一个默认的curl工具调用
+		args := make(map[string]interface{})
+		args["url"] = "localhost"
+		toolCalls = append(toolCalls, api.ToolCallMsg{
+			ToolName:  "curl",
+			Arguments: args,
+		})
 	}
 
 	return toolCalls
@@ -189,6 +302,17 @@ func (m ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.State = model.StateResult
 				return m, nil
 			}
+		case "y", "yes":
+			if m.State == model.StateConfirmation {
+				// 用户确认执行工具调用
+				m.Steps = append(m.Steps, "用户确认执行工具调用")
+				m.State = model.StateThinking
+				// 执行第一个工具调用
+				if len(m.pendingToolCalls) > 0 {
+					return m, executeToolCall(&m, m.pendingToolCalls[0])
+				}
+				return m, nil
+			}
 		}
 
 	case spinner.TickMsg:
@@ -201,10 +325,7 @@ func (m ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// 检查是否是错误消息
 		if len(msgStr) > 4 && msgStr[:4] == "错误: " {
-			// 错误发生，切换回输入状态
-			m.State = model.StateInput
 			m.Spinner, _ = m.Spinner.Update(spinner.TickMsg{})
-			m.UrlInput.Focus()
 		}
 		return m, nil
 
@@ -277,63 +398,130 @@ func (m ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // 实现View方法
 func (m ChatModel) View() string {
-	style := lipgloss.NewStyle().Padding(1, 2)
+	// 定义基本样式
+	baseStyle := lipgloss.NewStyle().Padding(1, 2)
+	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
+	subheaderStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("13"))
+	successStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
+	errorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("160"))
+	infoStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	resultStyle := lipgloss.NewStyle().
+		Border(lipgloss.NormalBorder()).
+		BorderForeground(lipgloss.Color("5")).
+		Padding(1, 2).
+		MarginTop(1)
+	stepStyle := lipgloss.NewStyle().PaddingLeft(2)
 
 	switch m.State {
 	case model.StateInput:
-		header := lipgloss.NewStyle().Foreground(lipgloss.Color("12")).Bold(true).Render("🌐 AI URL ANALYZER")
-		return style.Render(fmt.Sprintf(
-			"%s\n\n%s\n\n%s",
+		header := headerStyle.Render("🌐 哪吒网络安全分析器")
+		subheader := subheaderStyle.Render("请输入目标 URL 或 IP 地址")
+		input := m.UrlInput.View()
+		footer := infoStyle.Render("ENTER 确认 • ESC 退出")
+
+		// 添加分隔线
+		separator := lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("─" + strings.Repeat("─", 60) + "─")
+
+		return baseStyle.Render(fmt.Sprintf(
+			"%s\n%s\n\n%s\n\n%s\n%s",
 			header,
-			m.UrlInput.View(),
-			lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("ENTER 确认 • ESC 退出"),
+			separator,
+			subheader,
+			input,
+			footer,
 		))
 
 	case model.StateThinking:
-		s := fmt.Sprintf("%s %s\n\n", m.Spinner.View(), "DEEPSEEK 思考中...")
+		s := fmt.Sprintf("%s %s\n\n", m.Spinner.View(), successStyle.Render("DEEPSEEK 思考中..."))
 
-		for _, step := range m.Steps {
-			check := lipgloss.NewStyle().Foreground(lipgloss.Color("42")).Render("✓")
-			s += fmt.Sprintf("%s %s\n", check, step)
+		// 添加执行步骤
+		if len(m.Steps) > 0 {
+			s += subheaderStyle.Render("执行步骤") + "\n"
+			for i, step := range m.Steps {
+				check := successStyle.Render("✓")
+				stepText := step
+				// 高亮显示错误消息
+				if strings.HasPrefix(step, "错误:") {
+					stepText = errorStyle.Render(step)
+				}
+				s += stepStyle.Render(fmt.Sprintf("%s %d. %s", check, i+1, stepText)) + "\n"
+			}
 		}
 
+		// 显示 AI 分析结果
 		if m.Result != "" {
-			resStyle := lipgloss.NewStyle().
-				Border(lipgloss.NormalBorder(), false, false, false, true).
-				BorderForeground(lipgloss.Color("5")).
-				PaddingLeft(2).
-				MarginTop(1)
-			s += "\n" + resStyle.Render(m.Result)
+			s += "\n" + subheaderStyle.Render("AI 分析结果") + "\n"
+			s += resultStyle.Render(m.Result)
 		}
-		s += "\n" + lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("P 暂停 • CTRL+C 退出")
-		return style.Render(s)
+
+		// 显示操作提示
+		footer := infoStyle.Render("P 暂停 • CTRL+C 退出")
+		s += "\n" + footer
+
+		return baseStyle.Render(s)
 
 	case model.StatePaused:
-		title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("13")).Render("⏸️  分析已暂停")
+		title := subheaderStyle.Render("⏸️  分析已暂停")
 		s := title + "\n\n"
 
-		for _, step := range m.Steps {
-			check := lipgloss.NewStyle().Foreground(lipgloss.Color("42")).Render("✓")
-			s += fmt.Sprintf("%s %s\n", check, step)
+		// 添加执行步骤
+		if len(m.Steps) > 0 {
+			s += subheaderStyle.Render("已执行步骤") + "\n"
+			for i, step := range m.Steps {
+				check := successStyle.Render("✓")
+				stepText := step
+				// 高亮显示错误消息
+				if strings.HasPrefix(step, "错误:") {
+					stepText = errorStyle.Render(step)
+				}
+				s += stepStyle.Render(fmt.Sprintf("%s %d. %s", check, i+1, stepText)) + "\n"
+			}
 		}
 
+		// 显示 AI 分析结果
 		if m.Result != "" {
-			resStyle := lipgloss.NewStyle().
-				Border(lipgloss.NormalBorder(), false, false, false, true).
-				BorderForeground(lipgloss.Color("5")).
-				PaddingLeft(2).
-				MarginTop(1)
-			s += "\n" + resStyle.Render(m.Result)
+			s += "\n" + subheaderStyle.Render("AI 分析结果") + "\n"
+			s += resultStyle.Render(m.Result)
 		}
-		s += "\n" + lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("P 恢复 • CTRL+C 退出")
-		return style.Render(s)
+
+		// 显示操作提示
+		footer := infoStyle.Render("P 恢复 • CTRL+C 退出")
+		s += "\n" + footer
+
+		return baseStyle.Render(s)
 
 	case model.StateResult:
-		title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("5")).Render("💡 分析完成")
-		return style.Render(fmt.Sprintf("%s\n\n%s\n\n%s", title, m.Result, "ENTER 返回 • CTRL+C 退出"))
+		title := headerStyle.Render("💡 分析完成")
+		subheader := subheaderStyle.Render("扫描结果摘要")
+		result := resultStyle.Render(m.Result)
+		footer := infoStyle.Render("ENTER 返回 • CTRL+C 退出")
+
+		// 添加分隔线
+		separator := lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("─" + strings.Repeat("─", 60) + "─")
+
+		return baseStyle.Render(fmt.Sprintf(
+			"%s\n%s\n\n%s\n\n%s\n\n%s",
+			title,
+			separator,
+			subheader,
+			result,
+			footer,
+		))
 	case model.StateConfirmation:
-		title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("13")).Render("⚠️  确认执行")
-		return style.Render(fmt.Sprintf("%s\n\n%s\n\n%s", title, m.confirmationMessage, "ENTER 确认 • N 取消 • CTRL+C 退出"))
+		title := subheaderStyle.Render("⚠️  确认执行")
+		message := m.confirmationMessage
+		footer := infoStyle.Render("ENTER 确认 • N 取消 • CTRL+C 退出")
+
+		// 添加分隔线
+		separator := lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("─" + strings.Repeat("─", 60) + "─")
+
+		return baseStyle.Render(fmt.Sprintf(
+			"%s\n%s\n\n%s\n\n%s",
+			title,
+			separator,
+			message,
+			footer,
+		))
 	}
 
 	return ""

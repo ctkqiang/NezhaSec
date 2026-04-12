@@ -37,6 +37,139 @@ func (r *ToolRegistry) registerDefaultTools() error {
 		return err
 	}
 	r.RegisterTool(curlExecutor)
+
+	// 注册nmap工具
+	nmapExecutor, err := executor.NewNmapExecutor()
+	if err != nil {
+		return err
+	}
+	r.RegisterTool(nmapExecutor)
+
+	// 注册sqlmap工具
+	sqlmapExecutor, err := executor.NewSqlmapExecutor()
+	if err != nil {
+		return err
+	}
+	r.RegisterTool(sqlmapExecutor)
+
+	// 注册QuestExploit工具
+	questExploitExecutor, err := executor.NewQuestExploitExecutor()
+	if err != nil {
+		return err
+	}
+	r.RegisterTool(questExploitExecutor)
+
+	// 注册Subfinder工具
+	subfinderExecutor, err := executor.NewSubfinderExecutor()
+	if err != nil {
+		return err
+	}
+	r.RegisterTool(subfinderExecutor)
+
+	// 注册Amass工具
+	amassExecutor, err := executor.NewAmassExecutor()
+	if err != nil {
+		return err
+	}
+	r.RegisterTool(amassExecutor)
+
+	// 注册Httpx工具
+	httpxExecutor, err := executor.NewHttpxExecutor()
+	if err != nil {
+		return err
+	}
+	r.RegisterTool(httpxExecutor)
+
+	// 注册Naabu工具
+	naabuExecutor, err := executor.NewNaabuExecutor()
+	if err != nil {
+		return err
+	}
+	r.RegisterTool(naabuExecutor)
+
+	// 注册Nuclei工具
+	nucleiExecutor, err := executor.NewNucleiExecutor()
+	if err != nil {
+		return err
+	}
+	r.RegisterTool(nucleiExecutor)
+
+	// 注册Garak工具
+	garakExecutor, err := executor.NewGarakExecutor()
+	if err != nil {
+		return err
+	}
+	r.RegisterTool(garakExecutor)
+
+	// 注册Trivy工具
+	trivyExecutor, err := executor.NewTrivyExecutor()
+	if err != nil {
+		return err
+	}
+	r.RegisterTool(trivyExecutor)
+
+	// 注册Msfconsole工具
+	msfconsoleExecutor, err := executor.NewMsfconsoleExecutor()
+	if err != nil {
+		return err
+	}
+	r.RegisterTool(msfconsoleExecutor)
+
+	// 注册Commix工具
+	commixExecutor, err := executor.NewCommixExecutor()
+	if err != nil {
+		return err
+	}
+	r.RegisterTool(commixExecutor)
+
+	// 注册Sliver-cli工具
+	sliverCliExecutor, err := executor.NewSliverCliExecutor()
+	if err != nil {
+		return err
+	}
+	r.RegisterTool(sliverCliExecutor)
+
+	// 注册Havoc工具
+	havocExecutor, err := executor.NewHavocExecutor()
+	if err != nil {
+		return err
+	}
+	r.RegisterTool(havocExecutor)
+
+	// 注册Impacket工具
+	impacketExecutor, err := executor.NewImpacketExecutor()
+	if err != nil {
+		return err
+	}
+	r.RegisterTool(impacketExecutor)
+
+	// 注册Responder工具
+	responderExecutor, err := executor.NewResponderExecutor()
+	if err != nil {
+		return err
+	}
+	r.RegisterTool(responderExecutor)
+
+	// 注册CrackMapExec工具
+	crackMapExecExecutor, err := executor.NewCrackMapExecExecutor()
+	if err != nil {
+		return err
+	}
+	r.RegisterTool(crackMapExecExecutor)
+
+	// 注册Chisel工具
+	chiselExecutor, err := executor.NewChiselExecutor()
+	if err != nil {
+		return err
+	}
+	r.RegisterTool(chiselExecutor)
+
+	// 注册Ffuf工具
+	ffufExecutor, err := executor.NewFfufExecutor()
+	if err != nil {
+		return err
+	}
+	r.RegisterTool(ffufExecutor)
 	
 	return nil
 }
