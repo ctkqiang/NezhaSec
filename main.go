@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -8,72 +9,32 @@ import (
 	"nezha_sec/internal/api"
 	"nezha_sec/internal/orchestrator"
 	"nezha_sec/internal/registry"
+	"os"
 	"regexp"
 	"strings"
 	"time"
 )
 
 func processOutput() {
+	fmt.Println("请输入终端输出内容，按 Ctrl+D 结束输入:")
 
-	terminalOutput := `开始执行工具调用...
+	var terminalOutput strings.Builder
+	scanner := bufio.NewScanner(os.Stdin)
+	for scanner.Scan() {
+		terminalOutput.WriteString(scanner.Text())
+		terminalOutput.WriteString("\n")
+	}
 
-执行工具 1: nmap
-工具执行成功
-输出: Starting Nmap 7.94 ( https://nmap.org ) at 2026-04-12 20:36 +08
-Nmap scan report for localhost (127.0.0.1)
-Host is up (0.000073s latency).
-Other addresses for localhost (not scanned): ::1
-Not shown: 90 closed tcp ports (conn-refused)
-PORT     STATE SERVICE
-22/tcp   open  ssh
-53/tcp   open  domain
-80/tcp   open  http
-445/tcp  open  microsoft-ds
-3306/tcp open  mysql
-5000/tcp open  upnp
-5432/tcp open  postgresql
-5900/tcp open  vnc
-8000/tcp open  http-alt
-8080/tcp open  http-proxy
+	if err := scanner.Err(); err != nil {
+		fmt.Printf("读取输入失败: %v\n", err)
+		return
+	}
 
-Nmap done: 1 IP address (1 host up) scanned in 0.31 seconds
-
-
-执行工具 2: sqlmap
-工具执行成功
-输出:         ___
-       __H__
- ___ ___[,]_____ ___ ___  {1.10.3#pip}
-|_ -| . [)]     | .'| . |
-|___|_  [)]_|_|_|__,|  _|
-      |_|V...       |_|   https://sqlmap.org
-
-[!] legal disclaimer: Usage of sqlmap for attacking targets without prior mutual consent is illegal. It is the end user's responsibility to obey all applicable local, state and federal laws. Developers assume no liability and are not responsible for any misuse or damage caused by this program
-
-[*] starting @ 20:36:37 /2026-04-12/
-
-[1/1] URL:
-GET http://localhost
-do you want to test this URL? [Y/n/q]
-> Y
-[20:36:37] [INFO] testing URL 'http://localhost'
-[20:36:37] [INFO] using '/Users/johnmelodyme/.local/share/sqlmap/output/results-04122026_0836pm.csv' as the CSV results file in multiple targets mode
-[20:36:37] [INFO] testing connection to the target URL
-[20:36:38] [WARNING] the web server responded with an HTTP error code (502) which could interfere with the results of the tests
-[20:36:38] [INFO] checking if the target is protected by some kind of WAF/IPS
-[20:36:38] [INFO] testing if the target URL content is stable
-[20:36:38] [INFO] target URL content is stable
-[20:36:38] [ERROR] all tested parameters do not appear to be injectable. Try to increase values for '--level'/'--risk' options if you wish to perform more tests. If you suspect that there is some kind of protection mechanism involved (e.g. WAF) maybe you could try to use option '--tamper' (e.g. '--tamper=space2comment') and/or switch '--random-agent', skipping to the next target
-[20:36:38] [WARNING] HTTP error codes detected during run:
-502 (Bad Gateway) - 3 times
-[20:36:38] [INFO] you can find results of scanning in multiple targets mode inside the CSV file '/Users/johnmelodyme/.local/share/sqlmap/output/results-04122026_0836pm.csv'
-
-[*] ending @ 20:36:38 /2026-04-12/
-
-
-分析完成`
-
-	cleanedOutput := terminalOutput
+	cleanedOutput := terminalOutput.String()
+	if cleanedOutput == "" {
+		fmt.Println("错误: 未输入任何内容")
+		return
+	}
 
 	apiKey := api.GetDeepSeekAPIKey()
 	if apiKey == "" {
@@ -107,16 +68,13 @@ do you want to test this URL? [Y/n/q]
 	fmt.Scanln(&choice)
 
 	if choice == 1 {
-
 		processOutput()
 	} else {
-
 		fmt.Println("执行过程已停止")
 	}
 }
 
 func main() {
-
 	var targetURL string
 	var processMode bool
 	flag.StringVar(&targetURL, "u", "", "目标 URL 或 IP 地址")
@@ -196,7 +154,6 @@ func main() {
 }
 
 func parseToolCalls(response string, targetURL string) []api.ToolCallMsg {
-
 	var toolCalls []api.ToolCallMsg
 
 	toolCallsRegex := regexp.MustCompile(`tool_calls\s*=\s*\[(.*?)\]`)
@@ -205,6 +162,27 @@ func parseToolCalls(response string, targetURL string) []api.ToolCallMsg {
 		toolCallsJSON := "[" + matches[1] + "]"
 		var parsedCalls []api.ToolCallMsg
 		if err := json.Unmarshal([]byte(toolCallsJSON), &parsedCalls); err == nil {
+			for i := range parsedCalls {
+				if len(parsedCalls[i].Arguments) == 0 {
+					switch parsedCalls[i].ToolName {
+					case "curl", "sqlmap", "gobuster", "whatweb", "wpscan", "httpx", "nuclei", "ffuf", "trivy", "garak":
+						parsedCalls[i].Arguments = make(map[string]interface{})
+						parsedCalls[i].Arguments["url"] = targetURL
+					case "nmap":
+						parsedCalls[i].Arguments = make(map[string]interface{})
+						target := targetURL
+						if strings.HasPrefix(target, "http://") {
+							target = strings.TrimPrefix(target, "http://")
+						} else if strings.HasPrefix(target, "https://") {
+							target = strings.TrimPrefix(target, "https://")
+						}
+						if strings.Contains(target, "/") {
+							target = strings.Split(target, "/")[0]
+						}
+						parsedCalls[i].Arguments["target"] = target
+					}
+				}
+			}
 			return parsedCalls
 		}
 	}
@@ -215,6 +193,27 @@ func parseToolCalls(response string, targetURL string) []api.ToolCallMsg {
 		toolCallsJSON := "[" + matches[1] + "]"
 		var parsedCalls []api.ToolCallMsg
 		if err := json.Unmarshal([]byte(toolCallsJSON), &parsedCalls); err == nil {
+			for i := range parsedCalls {
+				if len(parsedCalls[i].Arguments) == 0 {
+					switch parsedCalls[i].ToolName {
+					case "curl", "sqlmap", "gobuster", "whatweb", "wpscan", "httpx", "nuclei", "ffuf", "trivy", "garak":
+						parsedCalls[i].Arguments = make(map[string]interface{})
+						parsedCalls[i].Arguments["url"] = targetURL
+					case "nmap":
+						parsedCalls[i].Arguments = make(map[string]interface{})
+						target := targetURL
+						if strings.HasPrefix(target, "http://") {
+							target = strings.TrimPrefix(target, "http://")
+						} else if strings.HasPrefix(target, "https://") {
+							target = strings.TrimPrefix(target, "https://")
+						}
+						if strings.Contains(target, "/") {
+							target = strings.Split(target, "/")[0]
+						}
+						parsedCalls[i].Arguments["target"] = target
+					}
+				}
+			}
 			return parsedCalls
 		}
 	}
@@ -234,12 +233,28 @@ func parseToolCalls(response string, targetURL string) []api.ToolCallMsg {
 			argsStr = strings.ReplaceAll(argsStr, ", ", ", ")
 
 			var args map[string]interface{}
-			if err := json.Unmarshal([]byte(argsStr), &args); err == nil {
-				toolCalls = append(toolCalls, api.ToolCallMsg{
-					ToolName:  toolName,
-					Arguments: args,
-				})
+			if err := json.Unmarshal([]byte(argsStr), &args); err != nil {
+				args = make(map[string]interface{})
+				switch toolName {
+				case "curl", "sqlmap", "gobuster", "whatweb", "wpscan", "httpx", "nuclei", "ffuf", "trivy", "garak":
+					args["url"] = targetURL
+				case "nmap":
+					target := targetURL
+					if strings.HasPrefix(target, "http://") {
+						target = strings.TrimPrefix(target, "http://")
+					} else if strings.HasPrefix(target, "https://") {
+						target = strings.TrimPrefix(target, "https://")
+					}
+					if strings.Contains(target, "/") {
+						target = strings.Split(target, "/")[0]
+					}
+					args["target"] = target
+				}
 			}
+			toolCalls = append(toolCalls, api.ToolCallMsg{
+				ToolName:  toolName,
+				Arguments: args,
+			})
 		}
 	}
 
@@ -258,21 +273,37 @@ func parseToolCalls(response string, targetURL string) []api.ToolCallMsg {
 			argsStr = strings.ReplaceAll(argsStr, ", ", ", ")
 
 			var args map[string]interface{}
-			if err := json.Unmarshal([]byte(argsStr), &args); err == nil {
-
-				exists := false
-				for _, existingCall := range toolCalls {
-					if existingCall.ToolName == toolName {
-						exists = true
-						break
+			if err := json.Unmarshal([]byte(argsStr), &args); err != nil {
+				args = make(map[string]interface{})
+				switch toolName {
+				case "curl", "sqlmap", "gobuster", "whatweb", "wpscan", "httpx", "nuclei", "ffuf", "trivy", "garak":
+					args["url"] = targetURL
+				case "nmap":
+					target := targetURL
+					if strings.HasPrefix(target, "http://") {
+						target = strings.TrimPrefix(target, "http://")
+					} else if strings.HasPrefix(target, "https://") {
+						target = strings.TrimPrefix(target, "https://")
 					}
+					if strings.Contains(target, "/") {
+						target = strings.Split(target, "/")[0]
+					}
+					args["target"] = target
 				}
-				if !exists {
-					toolCalls = append(toolCalls, api.ToolCallMsg{
-						ToolName:  toolName,
-						Arguments: args,
-					})
+			}
+
+			exists := false
+			for _, existingCall := range toolCalls {
+				if existingCall.ToolName == toolName {
+					exists = true
+					break
 				}
+			}
+			if !exists {
+				toolCalls = append(toolCalls, api.ToolCallMsg{
+					ToolName:  toolName,
+					Arguments: args,
+				})
 			}
 		}
 	}
@@ -289,21 +320,37 @@ func parseToolCalls(response string, targetURL string) []api.ToolCallMsg {
 			}
 
 			var params map[string]interface{}
-			if err := json.Unmarshal([]byte(paramsStr), &params); err == nil {
-
-				exists := false
-				for _, existingCall := range toolCalls {
-					if existingCall.ToolName == toolName {
-						exists = true
-						break
+			if err := json.Unmarshal([]byte(paramsStr), &params); err != nil {
+				params = make(map[string]interface{})
+				switch toolName {
+				case "curl", "sqlmap", "gobuster", "whatweb", "wpscan", "httpx", "nuclei", "ffuf", "trivy", "garak":
+					params["url"] = targetURL
+				case "nmap":
+					target := targetURL
+					if strings.HasPrefix(target, "http://") {
+						target = strings.TrimPrefix(target, "http://")
+					} else if strings.HasPrefix(target, "https://") {
+						target = strings.TrimPrefix(target, "https://")
 					}
+					if strings.Contains(target, "/") {
+						target = strings.Split(target, "/")[0]
+					}
+					params["target"] = target
 				}
-				if !exists {
-					toolCalls = append(toolCalls, api.ToolCallMsg{
-						ToolName:  toolName,
-						Arguments: params,
-					})
+			}
+
+			exists := false
+			for _, existingCall := range toolCalls {
+				if existingCall.ToolName == toolName {
+					exists = true
+					break
 				}
+			}
+			if !exists {
+				toolCalls = append(toolCalls, api.ToolCallMsg{
+					ToolName:  toolName,
+					Arguments: params,
+				})
 			}
 		}
 	}
@@ -326,6 +373,26 @@ func parseToolCalls(response string, targetURL string) []api.ToolCallMsg {
 					toolName = strings.TrimPrefix(toolName, "run_")
 				}
 
+				params := tool.Parameters
+				if params == nil || len(params) == 0 {
+					params = make(map[string]interface{})
+					switch toolName {
+					case "curl", "sqlmap", "gobuster", "whatweb", "wpscan", "httpx", "nuclei", "ffuf", "trivy", "garak":
+						params["url"] = targetURL
+					case "nmap":
+						target := targetURL
+						if strings.HasPrefix(target, "http://") {
+							target = strings.TrimPrefix(target, "http://")
+						} else if strings.HasPrefix(target, "https://") {
+							target = strings.TrimPrefix(target, "https://")
+						}
+						if strings.Contains(target, "/") {
+							target = strings.Split(target, "/")[0]
+						}
+						params["target"] = target
+					}
+				}
+
 				exists := false
 				for _, existingCall := range toolCalls {
 					if existingCall.ToolName == toolName {
@@ -336,7 +403,7 @@ func parseToolCalls(response string, targetURL string) []api.ToolCallMsg {
 				if !exists {
 					toolCalls = append(toolCalls, api.ToolCallMsg{
 						ToolName:  toolName,
-						Arguments: tool.Parameters,
+						Arguments: params,
 					})
 				}
 			}
@@ -368,6 +435,24 @@ func parseToolCalls(response string, targetURL string) []api.ToolCallMsg {
 				var paramArgs map[string]interface{}
 				if err := json.Unmarshal([]byte(paramStr), &paramArgs); err == nil {
 					args = paramArgs
+				}
+			}
+
+			if len(args) == 0 {
+				switch toolName {
+				case "curl", "sqlmap", "gobuster", "whatweb", "wpscan", "httpx", "nuclei", "ffuf", "trivy", "garak":
+					args["url"] = targetURL
+				case "nmap":
+					target := targetURL
+					if strings.HasPrefix(target, "http://") {
+						target = strings.TrimPrefix(target, "http://")
+					} else if strings.HasPrefix(target, "https://") {
+						target = strings.TrimPrefix(target, "https://")
+					}
+					if strings.Contains(target, "/") {
+						target = strings.Split(target, "/")[0]
+					}
+					args["target"] = target
 				}
 			}
 

@@ -28,7 +28,7 @@ func (e *SqlmapExecutor) Execute(ctx context.Context, arguments map[string]inter
 		}, nil
 	}
 
-	cmdArgs := []string{"-u", url}
+	cmdArgs := []string{"--batch", "-u", url}
 
 	if risk, ok := arguments["risk"].(string); ok && risk != "" {
 		cmdArgs = append(cmdArgs, "--risk", risk)
@@ -42,13 +42,6 @@ func (e *SqlmapExecutor) Execute(ctx context.Context, arguments map[string]inter
 	} else {
 
 		cmdArgs = append(cmdArgs, "--level", "1")
-	}
-
-	if batch, ok := arguments["batch"].(bool); ok && batch {
-		cmdArgs = append(cmdArgs, "--batch")
-	} else {
-
-		cmdArgs = append(cmdArgs, "--batch")
 	}
 
 	if threads, ok := arguments["threads"].(string); ok && threads != "" {
