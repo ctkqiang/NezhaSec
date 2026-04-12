@@ -9,11 +9,11 @@ import (
 type TUIState string
 
 const (
-	StateInput         TUIState = "input"
-	StateThinking      TUIState = "thinking"
-	StatePaused        TUIState = "paused"
-	StateResult        TUIState = "result"
-	StateConfirmation  TUIState = "confirmation"
+	StateInput        TUIState = "input"
+	StateThinking     TUIState = "thinking"
+	StatePaused       TUIState = "paused"
+	StateResult       TUIState = "result"
+	StateConfirmation TUIState = "confirmation"
 )
 
 type TUI struct {
@@ -26,7 +26,7 @@ type TUI struct {
 
 func InitialModel() TUI {
 	ti := textinput.New()
-	ti.Placeholder = "请输入 URL (例如: https://github.com)..."
+	ti.Placeholder = "请输入 URL (例如: https://example.com)"
 	ti.Focus()
 
 	s := spinner.New()
