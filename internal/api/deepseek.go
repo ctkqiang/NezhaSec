@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"time"
@@ -19,6 +18,10 @@ type (
 	ProgressMsg         string
 	DeepSeekResponseMsg struct {
 		Result string
+	}
+	ToolCallMsg struct {
+		ToolName  string                 `json:"tool_name"`
+		Arguments map[string]interface{} `json:"arguments"`
 	}
 )
 
@@ -82,7 +85,7 @@ func CallDeepSeekAPI(url string) tea.Cmd {
 	// 创建一个默认的上下文
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	
+
 	return CallDeepSeekAPIWithContext(ctx, url)
 }
 
@@ -154,22 +157,33 @@ func AnalyzeURLWithDeepSeek(url string, apiKey string) (string, error) {
 	const maxRetries = 3
 	const retryDelay = 2 * time.Second
 
-	log.Printf("开始分析URL: %s", url)
+	fmt.Fprintf(os.Stderr, "开始分析URL: %s\n", url)
+
+	// 读取.deepseekrules文件内容
+	rulesContent, err := os.ReadFile(".deepseekrules")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "读取.deepseekrules文件失败: %v\n", err)
+		return "", fmt.Errorf("读取规则文件失败: %w", err)
+	}
+
+	systemPrompt := string(rulesContent)
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
-		log.Printf("API调用尝试 %d/%d", attempt, maxRetries)
-		
+		fmt.Fprintf(os.Stderr, "API调用尝试 %d/%d\n", attempt, maxRetries)
+
 		// 构建请求
 		request := DeepSeekRequest{
 			Model: "deepseek-chat",
 			Messages: []Message{
 				{
 					Role:    "system",
-					Content: "你是一个网络安全分析助手，负责分析给定URL的安全性。请提供详细的安全分析报告，包括潜在的漏洞、安全配置问题等。",
+					Content: systemPrompt,
 				},
 				{
-					Role:    "user",
-					Content: fmt.Sprintf("请分析以下URL的安全性：%s", url),
+					Role: "user",
+					Content: fmt.Sprintf(`请分析以下URL的安全性并规划渗透测试步骤：%s
+
+请返回详细的分析报告和具体的工具调用列表。`, url),
 				},
 			},
 			Stream: false,
@@ -178,7 +192,7 @@ func AnalyzeURLWithDeepSeek(url string, apiKey string) (string, error) {
 		// 序列化请求
 		requestBody, err := json.Marshal(request)
 		if err != nil {
-			log.Printf("序列化请求失败: %v", err)
+			fmt.Fprintf(os.Stderr, "序列化请求失败: %v\n", err)
 			return "", fmt.Errorf("序列化请求失败: %w", err)
 		}
 
@@ -189,7 +203,7 @@ func AnalyzeURLWithDeepSeek(url string, apiKey string) (string, error) {
 
 		req, err := http.NewRequest("POST", "https://api.deepseek.com/chat/completions", bytes.NewBuffer(requestBody))
 		if err != nil {
-			log.Printf("创建请求失败: %v", err)
+			fmt.Fprintf(os.Stderr, "创建请求失败: %v\n", err)
 			return "", fmt.Errorf("创建请求失败: %w", err)
 		}
 
@@ -198,15 +212,15 @@ func AnalyzeURLWithDeepSeek(url string, apiKey string) (string, error) {
 		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", apiKey))
 
 		// 发送请求
-		log.Printf("发送API请求到: %s", req.URL.String())
+		fmt.Fprintf(os.Stderr, "发送API请求到: %s\n", req.URL.String())
 		startTime := time.Now()
 		resp, err := client.Do(req)
 		duration := time.Since(startTime)
-		
+
 		if err != nil {
-			log.Printf("API请求失败 (尝试 %d/%d): %v (耗时: %v)", attempt, maxRetries, err, duration)
+			fmt.Fprintf(os.Stderr, "API请求失败 (尝试 %d/%d): %v (耗时: %v)\n", attempt, maxRetries, err, duration)
 			if attempt < maxRetries {
-				log.Printf("等待 %v 后重试...", retryDelay)
+				fmt.Fprintf(os.Stderr, "等待 %v 后重试...\n", retryDelay)
 				time.Sleep(retryDelay)
 				continue
 			}
@@ -217,7 +231,7 @@ func AnalyzeURLWithDeepSeek(url string, apiKey string) (string, error) {
 		// 读取响应
 		respBody, err := io.ReadAll(resp.Body)
 		if err != nil {
-			log.Printf("读取响应失败 (尝试 %d/%d): %v", attempt, maxRetries, err)
+			fmt.Fprintf(os.Stderr, "读取响应失败 (尝试 %d/%d): %v\n", attempt, maxRetries, err)
 			if attempt < maxRetries {
 				time.Sleep(retryDelay)
 				continue
@@ -227,14 +241,14 @@ func AnalyzeURLWithDeepSeek(url string, apiKey string) (string, error) {
 
 		// 检查响应状态码
 		if resp.StatusCode != http.StatusOK {
-			log.Printf("API返回错误状态码: %d, 响应: %s", resp.StatusCode, string(respBody))
+			fmt.Fprintf(os.Stderr, "API返回错误状态码: %d, 响应: %s\n", resp.StatusCode, string(respBody))
 			return "", fmt.Errorf("API返回错误状态码: %d, 响应: %s", resp.StatusCode, string(respBody))
 		}
 
 		// 解析响应
 		var deepSeekResp DeepSeekResponse
 		if err := json.Unmarshal(respBody, &deepSeekResp); err != nil {
-			log.Printf("解析响应失败 (尝试 %d/%d): %v", attempt, maxRetries, err)
+			fmt.Fprintf(os.Stderr, "解析响应失败 (尝试 %d/%d): %v\n", attempt, maxRetries, err)
 			if attempt < maxRetries {
 				time.Sleep(retryDelay)
 				continue
@@ -244,19 +258,19 @@ func AnalyzeURLWithDeepSeek(url string, apiKey string) (string, error) {
 
 		// 提取结果
 		if len(deepSeekResp.Choices) == 0 {
-			log.Printf("API返回空结果")
+			fmt.Fprintf(os.Stderr, "API返回空结果\n")
 			return "", fmt.Errorf("API返回空结果")
 		}
 
-		log.Printf("API调用成功 (尝试 %d/%d), 耗时: %v, 令牌使用: %d (提示) + %d (完成) = %d (总)", 
-			attempt, maxRetries, duration, 
-			deepSeekResp.Usage.PromptTokens, 
-			deepSeekResp.Usage.CompletionTokens, 
+		fmt.Fprintf(os.Stderr, "API调用成功 (尝试 %d/%d), 耗时: %v, 令牌使用: %d (提示) + %d (完成) = %d (总)\n",
+			attempt, maxRetries, duration,
+			deepSeekResp.Usage.PromptTokens,
+			deepSeekResp.Usage.CompletionTokens,
 			deepSeekResp.Usage.TotalTokens)
 
 		return deepSeekResp.Choices[0].Message.Content, nil
 	}
 
-	log.Printf("API调用失败：达到最大重试次数")
+	fmt.Fprintf(os.Stderr, "API调用失败：达到最大重试次数\n")
 	return "", fmt.Errorf("API调用失败：达到最大重试次数")
 }

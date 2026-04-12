@@ -2,11 +2,14 @@ package views
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"nezha_sec/internal/api"
 	"nezha_sec/internal/model"
 	"nezha_sec/internal/orchestrator"
 	"nezha_sec/internal/registry"
+	"regexp"
+	"strings"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -20,13 +23,96 @@ type ChatModel struct {
 	orchestrator *orchestrator.Orchestrator
 	// 取消函数，用于取消正在进行的操作
 	cancelFunc context.CancelFunc
+	// 确认提示消息
+	confirmationMessage string
+	// 待执行的工具调用
+	pendingToolCalls []api.ToolCallMsg
+	// 自动确认模式
+	autoConfirm bool
 }
 
 // 定义消息类型
 type (
-	ResultChunkMsg string
-	DoneMsg        struct{}
+	ResultChunkMsg   string
+	DoneMsg          struct{}
+	ToolExecutionMsg struct {
+		ToolName string
+		Result   *model.ExecutionResult
+		Error    error
+	}
 )
+
+// 解析AI响应中的工具调用
+func parseToolCalls(response string) []api.ToolCallMsg {
+	// 查找tool_calls部分
+	toolCallsRegex := regexp.MustCompile(`tool_calls\s*=\s*\[(.*?)\]`)
+	matches := toolCallsRegex.FindStringSubmatch(response)
+	if len(matches) < 2 {
+		// 尝试另一种格式
+		altRegex := regexp.MustCompile(`工具调用列表\s*:\s*\[(.*?)\]`)
+		matches = altRegex.FindStringSubmatch(response)
+		if len(matches) < 2 {
+			return []api.ToolCallMsg{}
+		}
+	}
+
+	// 提取工具调用JSON
+	toolCallsJSON := "[" + matches[1] + "]"
+
+	// 解析JSON
+	var toolCalls []api.ToolCallMsg
+	err := json.Unmarshal([]byte(toolCallsJSON), &toolCalls)
+	if err != nil {
+		// 尝试解析单个工具调用
+		singleToolRegex := regexp.MustCompile(`-\s*` + "`" + `(\w+)` + "`" + `.*?\{([^}]+)\}`)
+		singleMatches := singleToolRegex.FindAllStringSubmatch(response, -1)
+		for _, match := range singleMatches {
+			if len(match) >= 3 {
+				toolName := match[1]
+				argsStr := "{" + match[2] + "}"
+
+				// 清理argsStr
+				argsStr = strings.ReplaceAll(argsStr, "url", "\"url\"")
+				argsStr = strings.ReplaceAll(argsStr, "=", ":")
+				argsStr = strings.ReplaceAll(argsStr, "https://", "\"https://")
+				argsStr = strings.ReplaceAll(argsStr, "http://", "\"http://")
+				argsStr = strings.ReplaceAll(argsStr, "", "\"")
+				argsStr = strings.ReplaceAll(argsStr, ", ", ", ")
+
+				var args map[string]interface{}
+				err := json.Unmarshal([]byte(argsStr), &args)
+				if err == nil {
+					toolCalls = append(toolCalls, api.ToolCallMsg{
+						ToolName:  toolName,
+						Arguments: args,
+					})
+				}
+			}
+		}
+		return toolCalls
+	}
+
+	return toolCalls
+}
+
+// 执行工具调用
+func executeToolCall(m *ChatModel, toolCall api.ToolCallMsg) tea.Cmd {
+	return func() tea.Msg {
+		if m == nil || m.orchestrator == nil {
+			return ToolExecutionMsg{
+				ToolName: toolCall.ToolName,
+				Result:   nil,
+				Error:    fmt.Errorf("模型或调度器为nil"),
+			}
+		}
+		result, err := m.orchestrator.ExecuteTool(toolCall.ToolName, toolCall.Arguments)
+		return ToolExecutionMsg{
+			ToolName: toolCall.ToolName,
+			Result:   result,
+			Error:    err,
+		}
+	}
+}
 
 // 实现Init方法
 func (m ChatModel) Init() tea.Cmd {
@@ -86,6 +172,22 @@ func (m ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.UrlInput.Reset()
 				m.UrlInput.Focus()
 				return m, nil
+			} else if m.State == model.StateConfirmation {
+				// 用户确认执行工具调用
+				m.Steps = append(m.Steps, "用户确认执行工具调用")
+				m.State = model.StateThinking
+				// 执行第一个工具调用
+				if len(m.pendingToolCalls) > 0 {
+					return m, executeToolCall(&m, m.pendingToolCalls[0])
+				}
+				return m, nil
+			}
+		case "n":
+			if m.State == model.StateConfirmation {
+				// 用户取消执行工具调用
+				m.Steps = append(m.Steps, "用户取消执行工具调用")
+				m.State = model.StateResult
+				return m, nil
 			}
 		}
 
@@ -108,8 +210,54 @@ func (m ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case api.DeepSeekResponseMsg:
 		m.Result = msg.Result
-		m.State = model.StateResult
-		return m, nil
+		m.Steps = append(m.Steps, "AI分析完成，准备执行工具调用...")
+
+		// 解析工具调用
+		toolCalls := parseToolCalls(msg.Result)
+		if len(toolCalls) > 0 {
+			// 存储待执行的工具调用
+			m.pendingToolCalls = toolCalls
+
+			if m.autoConfirm {
+				// 自动确认模式：直接执行第一个工具调用
+				m.Steps = append(m.Steps, "自动确认执行工具调用")
+				return m, executeToolCall(&m, m.pendingToolCalls[0])
+			} else {
+				// 构建确认提示消息
+				m.confirmationMessage = "AI 建议执行以下工具调用：\n"
+				for i, toolCall := range toolCalls {
+					m.confirmationMessage += fmt.Sprintf("%d. %s\n", i+1, toolCall.ToolName)
+				}
+				m.confirmationMessage += "\n是否开始执行？"
+
+				// 切换到确认状态
+				m.State = model.StateConfirmation
+				return m, nil
+			}
+		} else {
+			m.State = model.StateResult
+			return m, nil
+		}
+
+	case ToolExecutionMsg:
+		if msg.Error != nil {
+			m.Steps = append(m.Steps, fmt.Sprintf("工具执行失败 %s: %v", msg.ToolName, msg.Error))
+		} else {
+			m.Steps = append(m.Steps, fmt.Sprintf("工具执行成功 %s", msg.ToolName))
+		}
+
+		// 检查是否还有更多工具需要执行
+		if len(m.pendingToolCalls) > 1 {
+			// 移除已执行的工具调用
+			m.pendingToolCalls = m.pendingToolCalls[1:]
+			// 自动执行下一个工具调用
+			m.Steps = append(m.Steps, "自动执行下一个工具调用")
+			return m, executeToolCall(&m, m.pendingToolCalls[0])
+		} else {
+			// 所有工具调用已执行完成
+			m.State = model.StateResult
+			return m, nil
+		}
 
 	case ResultChunkMsg:
 		m.Result += string(msg)
@@ -183,6 +331,9 @@ func (m ChatModel) View() string {
 	case model.StateResult:
 		title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("5")).Render("💡 分析完成")
 		return style.Render(fmt.Sprintf("%s\n\n%s\n\n%s", title, m.Result, "ENTER 返回 • CTRL+C 退出"))
+	case model.StateConfirmation:
+		title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("13")).Render("⚠️  确认执行")
+		return style.Render(fmt.Sprintf("%s\n\n%s\n\n%s", title, m.confirmationMessage, "ENTER 确认 • N 取消 • CTRL+C 退出"))
 	}
 
 	return ""
@@ -208,5 +359,6 @@ func NewChatModel() (ChatModel, error) {
 	return ChatModel{
 		TUI:          model.InitialModel(),
 		orchestrator: orchestratorInstance,
+		autoConfirm:  true, // 启用自动确认模式
 	}, nil
 }

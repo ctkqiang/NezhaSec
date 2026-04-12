@@ -9,10 +9,11 @@ import (
 type TUIState string
 
 const (
-	StateInput    TUIState = "input"
-	StateThinking TUIState = "thinking"
-	StatePaused   TUIState = "paused"
-	StateResult   TUIState = "result"
+	StateInput         TUIState = "input"
+	StateThinking      TUIState = "thinking"
+	StatePaused        TUIState = "paused"
+	StateResult        TUIState = "result"
+	StateConfirmation  TUIState = "confirmation"
 )
 
 type TUI struct {
