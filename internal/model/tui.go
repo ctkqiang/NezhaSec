@@ -11,6 +11,7 @@ type TUIState string
 const (
 	StateInput    TUIState = "input"
 	StateThinking TUIState = "thinking"
+	StatePaused   TUIState = "paused"
 	StateResult   TUIState = "result"
 )
 
