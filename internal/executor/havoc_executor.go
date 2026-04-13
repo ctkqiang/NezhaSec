@@ -54,5 +54,5 @@ func (e *HavocExecutor) Execute(ctx context.Context, arguments map[string]interf
 }
 
 func (e *HavocExecutor) GetToolName() string {
-	return "Havoc"
+	return "havoc"
 }

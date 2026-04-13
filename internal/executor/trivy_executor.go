@@ -58,5 +58,5 @@ func (e *TrivyExecutor) Execute(ctx context.Context, arguments map[string]interf
 }
 
 func (e *TrivyExecutor) GetToolName() string {
-	return "Trivy"
+	return "trivy"
 }

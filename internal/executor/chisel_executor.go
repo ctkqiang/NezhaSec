@@ -62,5 +62,5 @@ func (e *ChiselExecutor) Execute(ctx context.Context, arguments map[string]inter
 }
 
 func (e *ChiselExecutor) GetToolName() string {
-	return "Chisel"
+	return "chisel"
 }

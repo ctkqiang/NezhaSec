@@ -58,5 +58,5 @@ func (e *ResponderExecutor) Execute(ctx context.Context, arguments map[string]in
 }
 
 func (e *ResponderExecutor) GetToolName() string {
-	return "Responder"
+	return "responder"
 }

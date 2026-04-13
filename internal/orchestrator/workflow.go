@@ -11,13 +11,13 @@ import (
 type WorkflowPhase string
 
 const (
-	PhaseReconnaissance      WorkflowPhase = "reconnaissance"
-	PhaseVulnerabilityScan   WorkflowPhase = "vulnerability_scan"
-	PhaseExploitation        WorkflowPhase = "exploitation"
-	PhasePrivilegeEscalation WorkflowPhase = "privilege_escalation"
-	PhaseLateralMovement     WorkflowPhase = "lateral_movement"
-	PhasePostExploitation    WorkflowPhase = "post_exploitation"
-	PhaseReporting           WorkflowPhase = "reporting"
+	PhaseReconnaissance      WorkflowPhase = "侦察阶段"
+	PhaseVulnerabilityScan   WorkflowPhase = "漏洞扫描阶段"
+	PhaseExploitation        WorkflowPhase = "利用阶段"
+	PhasePrivilegeEscalation WorkflowPhase = "权限提升阶段"
+	PhaseLateralMovement     WorkflowPhase = "横向移动阶段"
+	PhasePostExploitation    WorkflowPhase = "后利用阶段"
+	PhaseReporting           WorkflowPhase = "报告阶段"
 )
 
 type WorkflowState struct {
@@ -33,6 +33,7 @@ type WorkflowManager struct {
 	orchestrator *Orchestrator
 	state        *WorkflowState
 	config       map[string]interface{}
+	messageChan  chan interface{}
 }
 
 func NewWorkflowManager(orchestrator *Orchestrator) *WorkflowManager {
@@ -45,6 +46,42 @@ func NewWorkflowManager(orchestrator *Orchestrator) *WorkflowManager {
 			StartTime:    time.Now(),
 		},
 		config: make(map[string]interface{}),
+	}
+}
+
+func (wm *WorkflowManager) SetMessageChannel(ch chan interface{}) {
+	wm.messageChan = ch
+}
+
+func (wm *WorkflowManager) sendPhaseChange(phase WorkflowPhase) {
+	if wm.messageChan != nil {
+		wm.messageChan <- struct {
+			Phase string
+		}{Phase: string(phase)}
+	}
+}
+
+func (wm *WorkflowManager) sendLog(logMessage string) {
+	if wm.messageChan != nil {
+		wm.messageChan <- struct {
+			Log string
+		}{Log: logMessage}
+	}
+}
+
+func (wm *WorkflowManager) sendSuccess(message string) {
+	if wm.messageChan != nil {
+		wm.messageChan <- struct {
+			Message string
+		}{Message: message}
+	}
+}
+
+func (wm *WorkflowManager) sendError(err error) {
+	if wm.messageChan != nil {
+		wm.messageChan <- struct {
+			Error string
+		}{Error: err.Error()}
 	}
 }
 
@@ -73,23 +110,29 @@ func (wm *WorkflowManager) ExecuteWorkflow(ctx context.Context) error {
 	}
 
 	for _, phase := range phases {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
 		wm.state.CurrentPhase = phase
+		wm.sendPhaseChange(phase)
 		log.Printf("开始阶段: %s", phase)
 
 		err := wm.executePhase(ctx, phase)
 		if err != nil {
 			log.Printf("阶段执行失败 %s: %v", phase, err)
-			// 继续执行下一阶段，不中断整个工作流
+			wm.sendError(fmt.Errorf("阶段 %s 执行失败: %w", phase, err))
 			continue
 		}
 
-		// 检查是否需要跳过后续阶段
 		if wm.shouldSkipNextPhases() {
 			log.Println("根据当前结果，跳过后续阶段")
+			wm.sendLog("根据当前结果，跳过后续阶段")
 			break
 		}
 
-		// 短暂延迟，避免工具执行过于密集
 		time.Sleep(1 * time.Second)
 	}
 
@@ -121,20 +164,21 @@ func (wm *WorkflowManager) executePhase(ctx context.Context, phase WorkflowPhase
 
 func (wm *WorkflowManager) executeReconnaissance(ctx context.Context) error {
 	log.Println("执行侦察阶段...")
+	wm.sendLog("执行侦察阶段...")
 
-	// 1. 使用 subfinder 发现子域名
 	subfinderArgs := map[string]interface{}{
 		"domain": wm.extractDomain(wm.state.Target),
 	}
 	subfinderResult, err := wm.orchestrator.ExecuteTool("subfinder", subfinderArgs)
 	if err != nil {
 		log.Printf("subfinder 执行失败: %v", err)
+		wm.sendLog(fmt.Sprintf("subfinder 执行失败: %v", err))
 	} else {
 		wm.state.Results[PhaseReconnaissance] = subfinderResult
 		wm.state.Context["subdomains"] = subfinderResult.Output
+		wm.sendSuccess("子域名发现完成")
 	}
 
-	// 2. 使用 amass 进行深度资产发现
 	amassArgs := map[string]interface{}{
 		"domain":  wm.extractDomain(wm.state.Target),
 		"passive": true,
@@ -142,11 +186,12 @@ func (wm *WorkflowManager) executeReconnaissance(ctx context.Context) error {
 	amassResult, err := wm.orchestrator.ExecuteTool("amass", amassArgs)
 	if err != nil {
 		log.Printf("amass 执行失败: %v", err)
+		wm.sendLog(fmt.Sprintf("amass 执行失败: %v", err))
 	} else {
 		wm.state.Context["assets"] = amassResult.Output
+		wm.sendSuccess("资产发现完成")
 	}
 
-	// 3. 使用 httpx 进行 HTTP 探测
 	httpxArgs := map[string]interface{}{
 		"targets":     wm.state.Target,
 		"probe":       true,
@@ -156,11 +201,12 @@ func (wm *WorkflowManager) executeReconnaissance(ctx context.Context) error {
 	httpxResult, err := wm.orchestrator.ExecuteTool("httpx", httpxArgs)
 	if err != nil {
 		log.Printf("httpx 执行失败: %v", err)
+		wm.sendLog(fmt.Sprintf("httpx 执行失败: %v", err))
 	} else {
 		wm.state.Context["http_info"] = httpxResult.Output
+		wm.sendSuccess("HTTP 探测完成")
 	}
 
-	// 4. 使用 nmap 进行端口扫描
 	nmapArgs := map[string]interface{}{
 		"target":    wm.extractDomain(wm.state.Target),
 		"ports":     "1-1000",
@@ -169,8 +215,10 @@ func (wm *WorkflowManager) executeReconnaissance(ctx context.Context) error {
 	nmapResult, err := wm.orchestrator.ExecuteTool("nmap", nmapArgs)
 	if err != nil {
 		log.Printf("nmap 执行失败: %v", err)
+		wm.sendLog(fmt.Sprintf("nmap 执行失败: %v", err))
 	} else {
 		wm.state.Context["ports"] = nmapResult.Output
+		wm.sendSuccess("端口扫描完成")
 	}
 
 	return nil
@@ -178,8 +226,8 @@ func (wm *WorkflowManager) executeReconnaissance(ctx context.Context) error {
 
 func (wm *WorkflowManager) executeVulnerabilityScan(ctx context.Context) error {
 	log.Println("执行漏洞扫描阶段...")
+	wm.sendLog("执行漏洞扫描阶段...")
 
-	// 1. 使用 nuclei 进行漏洞扫描
 	nucleiArgs := map[string]interface{}{
 		"target":    wm.state.Target,
 		"templates": "cves,exposures,misconfigurations",
@@ -187,12 +235,13 @@ func (wm *WorkflowManager) executeVulnerabilityScan(ctx context.Context) error {
 	nucleiResult, err := wm.orchestrator.ExecuteTool("nuclei", nucleiArgs)
 	if err != nil {
 		log.Printf("nuclei 执行失败: %v", err)
+		wm.sendLog(fmt.Sprintf("nuclei 执行失败: %v", err))
 	} else {
 		wm.state.Results[PhaseVulnerabilityScan] = nucleiResult
 		wm.state.Context["vulnerabilities"] = nucleiResult.Output
+		wm.sendSuccess("漏洞扫描完成")
 	}
 
-	// 2. 使用 ffuf 进行目录爆破
 	ffufArgs := map[string]interface{}{
 		"url":        wm.state.Target + "/FUZZ",
 		"wordlist":   "common.txt",
@@ -201,11 +250,12 @@ func (wm *WorkflowManager) executeVulnerabilityScan(ctx context.Context) error {
 	ffufResult, err := wm.orchestrator.ExecuteTool("ffuf", ffufArgs)
 	if err != nil {
 		log.Printf("ffuf 执行失败: %v", err)
+		wm.sendLog(fmt.Sprintf("ffuf 执行失败: %v", err))
 	} else {
 		wm.state.Context["directories"] = ffufResult.Output
+		wm.sendSuccess("目录爆破完成")
 	}
 
-	// 3. 使用 sqlmap 进行 SQL 注入检测
 	sqlmapArgs := map[string]interface{}{
 		"url":   wm.state.Target,
 		"crawl": 2,
@@ -215,8 +265,10 @@ func (wm *WorkflowManager) executeVulnerabilityScan(ctx context.Context) error {
 	sqlmapResult, err := wm.orchestrator.ExecuteTool("sqlmap", sqlmapArgs)
 	if err != nil {
 		log.Printf("sqlmap 执行失败: %v", err)
+		wm.sendLog(fmt.Sprintf("sqlmap 执行失败: %v", err))
 	} else {
 		wm.state.Context["sql_injection"] = sqlmapResult.Output
+		wm.sendSuccess("SQL 注入检测完成")
 	}
 
 	return nil
@@ -224,15 +276,14 @@ func (wm *WorkflowManager) executeVulnerabilityScan(ctx context.Context) error {
 
 func (wm *WorkflowManager) executeExploitation(ctx context.Context) error {
 	log.Println("执行利用阶段...")
+	wm.sendLog("执行利用阶段...")
 
-	// 基于之前的扫描结果，选择合适的利用工具
 	vulnerabilities, ok := wm.state.Context["vulnerabilities"].(string)
 	if ok && vulnerabilities != "" {
-		// 这里可以根据漏洞类型选择对应的利用工具
 		log.Println("基于漏洞扫描结果执行利用...")
+		wm.sendLog("基于漏洞扫描结果执行利用...")
 	}
 
-	// 示例：使用 commix 进行命令注入检测
 	commixArgs := map[string]interface{}{
 		"url":   wm.state.Target,
 		"level": 1,
@@ -240,9 +291,11 @@ func (wm *WorkflowManager) executeExploitation(ctx context.Context) error {
 	commixResult, err := wm.orchestrator.ExecuteTool("commix", commixArgs)
 	if err != nil {
 		log.Printf("commix 执行失败: %v", err)
+		wm.sendLog(fmt.Sprintf("commix 执行失败: %v", err))
 	} else {
 		wm.state.Results[PhaseExploitation] = commixResult
 		wm.state.Context["command_injection"] = commixResult.Output
+		wm.sendSuccess("命令注入检测完成")
 	}
 
 	return nil
@@ -250,17 +303,19 @@ func (wm *WorkflowManager) executeExploitation(ctx context.Context) error {
 
 func (wm *WorkflowManager) executePrivilegeEscalation(ctx context.Context) error {
 	log.Println("执行权限提升阶段...")
+	wm.sendLog("执行权限提升阶段...")
 
-	// 这里可以集成权限提升工具，如 Metasploit
 	msfArgs := map[string]interface{}{
 		"command": "search exploit/unix",
 	}
 	msfResult, err := wm.orchestrator.ExecuteTool("msfconsole", msfArgs)
 	if err != nil {
 		log.Printf("msfconsole 执行失败: %v", err)
+		wm.sendLog(fmt.Sprintf("msfconsole 执行失败: %v", err))
 	} else {
 		wm.state.Results[PhasePrivilegeEscalation] = msfResult
 		wm.state.Context["privilege_escalation"] = msfResult.Output
+		wm.sendSuccess("权限提升模块搜索完成")
 	}
 
 	return nil
@@ -268,17 +323,19 @@ func (wm *WorkflowManager) executePrivilegeEscalation(ctx context.Context) error
 
 func (wm *WorkflowManager) executeLateralMovement(ctx context.Context) error {
 	log.Println("执行横向移动阶段...")
+	wm.sendLog("执行横向移动阶段...")
 
-	// 这里可以集成横向移动工具，如 impacket、responder 等
 	impacketArgs := map[string]interface{}{
 		"command": "smbclient -L //127.0.0.1",
 	}
 	impacketResult, err := wm.orchestrator.ExecuteTool("impacket", impacketArgs)
 	if err != nil {
 		log.Printf("impacket 执行失败: %v", err)
+		wm.sendLog(fmt.Sprintf("impacket 执行失败: %v", err))
 	} else {
 		wm.state.Results[PhaseLateralMovement] = impacketResult
 		wm.state.Context["lateral_movement"] = impacketResult.Output
+		wm.sendSuccess("横向移动探测完成")
 	}
 
 	return nil
@@ -286,17 +343,19 @@ func (wm *WorkflowManager) executeLateralMovement(ctx context.Context) error {
 
 func (wm *WorkflowManager) executePostExploitation(ctx context.Context) error {
 	log.Println("执行后利用阶段...")
+	wm.sendLog("执行后利用阶段...")
 
-	// 这里可以集成后利用工具，如 sliver-cli、havoc 等
 	sliverArgs := map[string]interface{}{
 		"command": "sessions",
 	}
 	sliverResult, err := wm.orchestrator.ExecuteTool("sliver-cli", sliverArgs)
 	if err != nil {
 		log.Printf("sliver-cli 执行失败: %v", err)
+		wm.sendLog(fmt.Sprintf("sliver-cli 执行失败: %v", err))
 	} else {
 		wm.state.Results[PhasePostExploitation] = sliverResult
 		wm.state.Context["post_exploitation"] = sliverResult.Output
+		wm.sendSuccess("后利用模块检查完成")
 	}
 
 	return nil
@@ -304,8 +363,8 @@ func (wm *WorkflowManager) executePostExploitation(ctx context.Context) error {
 
 func (wm *WorkflowManager) executeReporting(ctx context.Context) error {
 	log.Println("执行报告阶段...")
+	wm.sendLog("执行报告阶段...")
 
-	// 生成综合报告
 	report := fmt.Sprintf(`# 渗透测试报告
 
 ## 执行摘要
@@ -367,14 +426,13 @@ func (wm *WorkflowManager) executeReporting(ctx context.Context) error {
 	}
 
 	log.Println("报告生成完成")
+	wm.sendSuccess("报告生成完成")
 	fmt.Println(report)
 
 	return nil
 }
 
 func (wm *WorkflowManager) shouldSkipNextPhases() bool {
-	// 根据当前结果判断是否需要跳过后续阶段
-	// 例如，如果没有发现任何漏洞，可以跳过利用阶段
 	vulnerabilities, ok := wm.state.Context["vulnerabilities"].(string)
 	if ok && vulnerabilities == "" {
 		return true
@@ -383,7 +441,5 @@ func (wm *WorkflowManager) shouldSkipNextPhases() bool {
 }
 
 func (wm *WorkflowManager) extractDomain(target string) string {
-	// 从 URL 中提取域名
-	// 简单实现，实际项目中可能需要更复杂的解析
 	return target
 }

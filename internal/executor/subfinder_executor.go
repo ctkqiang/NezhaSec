@@ -62,5 +62,5 @@ func (e *SubfinderExecutor) Execute(ctx context.Context, arguments map[string]in
 }
 
 func (e *SubfinderExecutor) GetToolName() string {
-	return "Subfinder"
+	return "subfinder"
 }

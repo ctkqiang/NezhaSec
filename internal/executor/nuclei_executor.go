@@ -62,5 +62,5 @@ func (e *NucleiExecutor) Execute(ctx context.Context, arguments map[string]inter
 }
 
 func (e *NucleiExecutor) GetToolName() string {
-	return "Nuclei"
+	return "nuclei"
 }

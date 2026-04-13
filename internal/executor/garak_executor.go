@@ -58,5 +58,5 @@ func (e *GarakExecutor) Execute(ctx context.Context, arguments map[string]interf
 }
 
 func (e *GarakExecutor) GetToolName() string {
-	return "Garak"
+	return "garak"
 }

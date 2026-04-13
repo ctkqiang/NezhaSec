@@ -61,5 +61,5 @@ func (e *CommixExecutor) Execute(ctx context.Context, arguments map[string]inter
 }
 
 func (e *CommixExecutor) GetToolName() string {
-	return "Commix"
+	return "commix"
 }

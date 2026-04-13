@@ -62,5 +62,5 @@ func (e *NaabuExecutor) Execute(ctx context.Context, arguments map[string]interf
 }
 
 func (e *NaabuExecutor) GetToolName() string {
-	return "Naabu"
+	return "naabu"
 }

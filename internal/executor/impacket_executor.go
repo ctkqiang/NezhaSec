@@ -73,5 +73,5 @@ func (e *ImpacketExecutor) Execute(ctx context.Context, arguments map[string]int
 }
 
 func (e *ImpacketExecutor) GetToolName() string {
-	return "Impacket"
+	return "impacket"
 }

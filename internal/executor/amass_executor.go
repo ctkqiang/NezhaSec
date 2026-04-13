@@ -62,5 +62,5 @@ func (e *AmassExecutor) Execute(ctx context.Context, arguments map[string]interf
 }
 
 func (e *AmassExecutor) GetToolName() string {
-	return "Amass"
+	return "amass"
 }

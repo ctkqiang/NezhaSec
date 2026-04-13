@@ -62,5 +62,5 @@ func (e *CrackMapExecExecutor) Execute(ctx context.Context, arguments map[string
 }
 
 func (e *CrackMapExecExecutor) GetToolName() string {
-	return "CrackMapExec"
+	return "crackmapexec"
 }

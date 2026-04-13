@@ -65,5 +65,5 @@ func (e *FfufExecutor) Execute(ctx context.Context, arguments map[string]interfa
 }
 
 func (e *FfufExecutor) GetToolName() string {
-	return "Ffuf"
+	return "ffuf"
 }

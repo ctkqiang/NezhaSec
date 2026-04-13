@@ -54,5 +54,5 @@ func (e *SliverCliExecutor) Execute(ctx context.Context, arguments map[string]in
 }
 
 func (e *SliverCliExecutor) GetToolName() string {
-	return "Sliver-cli"
+	return "sliver-cli"
 }

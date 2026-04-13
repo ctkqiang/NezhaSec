@@ -30,22 +30,53 @@ func (e *SqlmapExecutor) Execute(ctx context.Context, arguments map[string]inter
 
 	cmdArgs := []string{"--batch", "-u", url}
 
-	if risk, ok := arguments["risk"].(string); ok && risk != "" {
-		cmdArgs = append(cmdArgs, "--risk", risk)
+	if riskVal, ok := arguments["risk"]; ok {
+		var riskStr string
+		switch v := riskVal.(type) {
+		case string:
+			riskStr = v
+		case int:
+			riskStr = fmt.Sprintf("%d", v)
+		case float64:
+			riskStr = fmt.Sprintf("%.0f", v)
+		}
+		if riskStr != "" {
+			cmdArgs = append(cmdArgs, "--risk", riskStr)
+		}
 	} else {
-
 		cmdArgs = append(cmdArgs, "--risk", "1")
 	}
 
-	if level, ok := arguments["level"].(string); ok && level != "" {
-		cmdArgs = append(cmdArgs, "--level", level)
+	if levelVal, ok := arguments["level"]; ok {
+		var levelStr string
+		switch v := levelVal.(type) {
+		case string:
+			levelStr = v
+		case int:
+			levelStr = fmt.Sprintf("%d", v)
+		case float64:
+			levelStr = fmt.Sprintf("%.0f", v)
+		}
+		if levelStr != "" {
+			cmdArgs = append(cmdArgs, "--level", levelStr)
+		}
 	} else {
-
 		cmdArgs = append(cmdArgs, "--level", "1")
 	}
 
-	if threads, ok := arguments["threads"].(string); ok && threads != "" {
-		cmdArgs = append(cmdArgs, "--threads", threads)
+	if threadsVal, ok := arguments["threads"]; ok {
+		var threadsStr string
+		switch v := threadsVal.(type) {
+		case string:
+			threadsStr = v
+		case int:
+			threadsStr = fmt.Sprintf("%d", v)
+		case float64:
+			threadsStr = fmt.Sprintf("%.0f", v)
+		}
+		if threadsStr != "" {
+			cmdArgs = append(cmdArgs, "--threads", threadsStr)
+		}
 	}
 
 	cmd := exec.CommandContext(ctx, "sqlmap", cmdArgs...)
