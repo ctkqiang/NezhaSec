@@ -1,0 +1,128 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            suffix: ''
+          - os: ubuntu-latest
+            goos: linux
+            goarch: arm64
+            suffix: ''
+          - os: macos-latest
+            goos: darwin
+            goarch: amd64
+            suffix: ''
+          - os: macos-latest
+            goos: darwin
+            goarch: arm64
+            suffix: ''
+          - os: windows-latest
+            goos: windows
+            goarch: amd64
+            suffix: '.exe'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          output_name="nezha_sec-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.suffix }}"
+          go build -ldflags="-s -w" -o "$output_name" .
+          echo "Built: $output_name"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nezha_sec-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: nezha_sec-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.suffix }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref_name }}
+          release_name: Release ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          body: |
+            ## 哪吒网络安全分析器 ${{ github.ref_name }}
+
+            ### 下载
+            根据你的系统选择对应的二进制文件：
+            - Linux AMD64: `nezha_sec-linux-amd64`
+            - Linux ARM64: `nezha_sec-linux-arm64`
+            - macOS AMD64: `nezha_sec-darwin-amd64`
+            - macOS ARM64 (M1/M2): `nezha_sec-darwin-arm64`
+            - Windows AMD64: `nezha_sec-windows-amd64.exe`
+
+            ### 使用方法
+            ```bash
+            # 基础扫描
+            ./nezha_sec -u https://example.com
+
+            # 工作流模式
+            ./nezha_sec -workflow
+            ```
+
+            ### 校验
+            所有二进制文件都经过 SHA256 校验，校验值见 `checksums.txt`。
+
+      - name: Upload Release Assets
+        run: |
+          for dir in ./artifacts/*/; do
+            filename=$(basename "$dir")
+            filepath=$(find "$dir" -type f | head -n 1)
+            if [ -f "$filepath" ]; then
+              echo "Uploading $filename..."
+              gh release upload "${{ github.ref_name }}" "$filepath" --clobber
+            fi
+          done
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate Checksums
+        run: |
+          cd ./artifacts
+          find . -type f -exec sha256sum {} \; > ../checksums.txt
+          cd ..
+          gh release upload "${{ github.ref_name }}" checksums.txt --clobber
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

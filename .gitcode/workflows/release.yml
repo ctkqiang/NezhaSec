@@ -1,0 +1,113 @@
+stages:
+  - build
+  - release
+
+variables:
+  GO_VERSION: "1.26"
+
+# 构建任务
+build:linux:amd64:
+  stage: build
+  image: golang:${GO_VERSION}
+  script:
+    - apt-get update && apt-get install -y git
+    - export GOOS=linux
+    - export GOARCH=amd64
+    - output_name="nezha_sec-linux-amd64"
+    - go build -ldflags="-s -w" -o "$output_name" .
+    - echo "构建完成: $output_name"
+  artifacts:
+    paths:
+      - nezha_sec-linux-amd64
+    expire_in: 1 week
+
+build:linux:arm64:
+  stage: build
+  image: golang:${GO_VERSION}
+  script:
+    - apt-get update && apt-get install -y git
+    - export GOOS=linux
+    - export GOARCH=arm64
+    - output_name="nezha_sec-linux-arm64"
+    - go build -ldflags="-s -w" -o "$output_name" .
+    - echo "构建完成: $output_name"
+  artifacts:
+    paths:
+      - nezha_sec-linux-arm64
+    expire_in: 1 week
+
+build:darwin:amd64:
+  stage: build
+  image: golang:${GO_VERSION}
+  script:
+    - apt-get update && apt-get install -y git
+    - export GOOS=darwin
+    - export GOARCH=amd64
+    - output_name="nezha_sec-darwin-amd64"
+    - go build -ldflags="-s -w" -o "$output_name" .
+    - echo "构建完成: $output_name"
+  artifacts:
+    paths:
+      - nezha_sec-darwin-amd64
+    expire_in: 1 week
+
+build:darwin:arm64:
+  stage: build
+  image: golang:${GO_VERSION}
+  script:
+    - apt-get update && apt-get install -y git
+    - export GOOS=darwin
+    - export GOARCH=arm64
+    - output_name="nezha_sec-darwin-arm64"
+    - go build -ldflags="-s -w" -o "$output_name" .
+    - echo "构建完成: $output_name"
+  artifacts:
+    paths:
+      - nezha_sec-darwin-arm64
+    expire_in: 1 week
+
+build:windows:amd64:
+  stage: build
+  image: golang:${GO_VERSION}
+  script:
+    - apt-get update && apt-get install -y git
+    - export GOOS=windows
+    - export GOARCH=amd64
+    - output_name="nezha_sec-windows-amd64.exe"
+    - go build -ldflags="-s -w" -o "$output_name" .
+    - echo "构建完成: $output_name"
+  artifacts:
+    paths:
+      - nezha_sec-windows-amd64.exe
+    expire_in: 1 week
+
+# 发布任务
+release:
+  stage: release
+  image: alpine:latest
+  dependencies:
+    - build:linux:amd64
+    - build:linux:arm64
+    - build:darwin:amd64
+    - build:darwin:arm64
+    - build:windows:amd64
+  script:
+    - apk add --no-cache bash coreutils
+    - mkdir -p release
+    - cp nezha_sec-* release/
+    - cd release
+    - |
+      for file in nezha_sec-*; do
+        if [ -f "$file" ]; then
+          sha256sum "$file" >> checksums.txt
+        fi
+      done
+    - cat checksums.txt
+    - echo "发布文件已准备完毕"
+  artifacts:
+    paths:
+      - release/
+    expire_in: 30 days
+  only:
+    - main
+    - tags
