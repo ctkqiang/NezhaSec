@@ -201,6 +201,70 @@ func main() {
 func parseToolCalls(response string, targetURL string) []api.ToolCallMsg {
 	var toolCalls []api.ToolCallMsg
 
+	// 处理 tools JSON 格式（AI 常用的格式）
+	toolsJSONRegex := regexp.MustCompile(`"tools"\s*:\s*\[(.*?)\]`)
+	toolsMatches := toolsJSONRegex.FindAllStringSubmatch(response, -1)
+	for _, match := range toolsMatches {
+		if len(match) >= 2 {
+			toolsJSON := "[" + match[1] + "]"
+
+			type Tool struct {
+				Name       string                 `json:"name"`
+				Parameters map[string]interface{} `json:"parameters"`
+			}
+			var tools []Tool
+			if err := json.Unmarshal([]byte(toolsJSON), &tools); err == nil {
+				for _, tool := range tools {
+
+					toolName := tool.Name
+					if strings.HasPrefix(toolName, "run_") {
+						toolName = strings.TrimPrefix(toolName, "run_")
+					}
+
+					params := tool.Parameters
+					if params == nil || len(params) == 0 {
+						params = make(map[string]interface{})
+						switch toolName {
+						case "curl", "sqlmap", "gobuster", "whatweb", "wpscan", "httpx", "nuclei", "ffuf", "trivy", "garak":
+							params["url"] = targetURL
+						case "nmap", "naabu":
+							target := targetURL
+							if strings.HasPrefix(target, "http://") {
+								target = strings.TrimPrefix(target, "http://")
+							} else if strings.HasPrefix(target, "https://") {
+								target = strings.TrimPrefix(target, "https://")
+							}
+							if strings.Contains(target, "/") {
+								target = strings.Split(target, "/")[0]
+							}
+							params["target"] = target
+						}
+					}
+
+					exists := false
+					for _, existingCall := range toolCalls {
+						if existingCall.ToolName == toolName {
+							exists = true
+							break
+						}
+					}
+					if !exists {
+						toolCalls = append(toolCalls, api.ToolCallMsg{
+							ToolName:  toolName,
+							Arguments: params,
+						})
+					}
+				}
+			}
+		}
+	}
+
+	// 如果已经解析到工具，直接返回
+	if len(toolCalls) > 0 {
+		return toolCalls
+	}
+
+	// 处理 tool_calls 格式
 	toolCallsRegex := regexp.MustCompile(`tool_calls\s*=\s*\[(.*?)\]`)
 	matches := toolCallsRegex.FindStringSubmatch(response)
 	if len(matches) >= 2 {
@@ -232,6 +296,7 @@ func parseToolCalls(response string, targetURL string) []api.ToolCallMsg {
 		}
 	}
 
+	// 处理工具调用列表格式
 	altRegex := regexp.MustCompile(`工具调用列表\s*:\s*\[(.*?)\]`)
 	matches = altRegex.FindStringSubmatch(response)
 	if len(matches) >= 2 {
@@ -396,61 +461,6 @@ func parseToolCalls(response string, targetURL string) []api.ToolCallMsg {
 					ToolName:  toolName,
 					Arguments: params,
 				})
-			}
-		}
-	}
-
-	toolsJSONRegex := regexp.MustCompile(`\{[\s\S]*?"tools"\s*:\s*\[(.*?)\]\s*\}`)
-	toolsMatches := toolsJSONRegex.FindStringSubmatch(response)
-	if len(toolsMatches) >= 2 {
-		toolsJSON := "[" + toolsMatches[1] + "]"
-
-		type Tool struct {
-			Name       string                 `json:"name"`
-			Parameters map[string]interface{} `json:"parameters"`
-		}
-		var tools []Tool
-		if err := json.Unmarshal([]byte(toolsJSON), &tools); err == nil {
-			for _, tool := range tools {
-
-				toolName := tool.Name
-				if strings.HasPrefix(toolName, "run_") {
-					toolName = strings.TrimPrefix(toolName, "run_")
-				}
-
-				params := tool.Parameters
-				if params == nil || len(params) == 0 {
-					params = make(map[string]interface{})
-					switch toolName {
-					case "curl", "sqlmap", "gobuster", "whatweb", "wpscan", "httpx", "nuclei", "ffuf", "trivy", "garak":
-						params["url"] = targetURL
-					case "nmap":
-						target := targetURL
-						if strings.HasPrefix(target, "http://") {
-							target = strings.TrimPrefix(target, "http://")
-						} else if strings.HasPrefix(target, "https://") {
-							target = strings.TrimPrefix(target, "https://")
-						}
-						if strings.Contains(target, "/") {
-							target = strings.Split(target, "/")[0]
-						}
-						params["target"] = target
-					}
-				}
-
-				exists := false
-				for _, existingCall := range toolCalls {
-					if existingCall.ToolName == toolName {
-						exists = true
-						break
-					}
-				}
-				if !exists {
-					toolCalls = append(toolCalls, api.ToolCallMsg{
-						ToolName:  toolName,
-						Arguments: params,
-					})
-				}
 			}
 		}
 	}

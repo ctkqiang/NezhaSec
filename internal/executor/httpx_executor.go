@@ -23,16 +23,21 @@ func (e *HttpxExecutor) Execute(ctx context.Context, arguments map[string]interf
 	if !ok || len(targets) == 0 {
 		target, ok := arguments["target"].(string)
 		if !ok || target == "" {
-			url, ok := arguments["url"].(string)
-			if !ok || url == "" {
-				return &model.ExecutionResult{
-					Success:       false,
-					ToolName:      e.GetToolName(),
-					Error:         "缺少targets、target或url参数",
-					ExecutionTime: time.Since(startTime).Milliseconds(),
-				}, nil
+			targetStr, ok := arguments["targets"].(string)
+			if !ok || targetStr == "" {
+				url, ok := arguments["url"].(string)
+				if !ok || url == "" {
+					return &model.ExecutionResult{
+						Success:       false,
+						ToolName:      e.GetToolName(),
+						Error:         "缺少targets、target或url参数",
+						ExecutionTime: time.Since(startTime).Milliseconds(),
+					}, nil
+				}
+				targets = []string{url}
+			} else {
+				targets = []string{targetStr}
 			}
-			targets = []string{url}
 		} else {
 			targets = []string{target}
 		}
