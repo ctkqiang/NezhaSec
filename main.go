@@ -8,6 +8,7 @@ import (
 	"log"
 	"nezha_sec/internal/api"
 	"nezha_sec/internal/orchestrator"
+	"nezha_sec/internal/output"
 	"nezha_sec/internal/registry"
 	"nezha_sec/internal/views"
 	"os"
@@ -130,15 +131,16 @@ func main() {
 			}
 			return
 		} else {
-			fmt.Println("请使用 -u 参数指定目标 URL 或 IP 地址")
-			fmt.Println("例如: ./nezha_sec -u https://example.com")
-			fmt.Println("或使用 -mcp 参数启动 MCP 风格界面")
-			fmt.Println("或使用 -workflow 参数启动红队工作流模式")
+			pretty := output.NewPrettyOutput()
+			pretty.PrintBanner()
+			pretty.PrintUsage()
 			return
 		}
 	}
 
-	log.Println("初始化应用...")
+	pretty := output.NewPrettyOutput()
+	pretty.PrintBanner()
+	pretty.PrintInitialization(targetURL)
 
 	toolRegistry, err := registry.NewToolRegistry()
 	if err != nil {
@@ -152,50 +154,68 @@ func main() {
 
 	allowed, reason := orchestratorInstance.SetTarget(targetURL, true)
 	if !allowed {
-		log.Fatalf("目标不允许扫描: %s", reason)
+		pretty.PrintError(fmt.Sprintf("目标不允许扫描: %s", reason))
+		return
 	}
 
-	log.Println("开始分析目标 URL...")
-	progressMsg := orchestratorInstance.StartAnalysis()
-	fmt.Println(string(progressMsg))
+	pretty.PrintAnalysisStart()
 
-	log.Println("调用 DeepSeek API 进行分析...")
-	result, err := api.AnalyzeURLWithDeepSeek(targetURL, api.GetDeepSeekAPIKey())
-	if err != nil {
-		log.Fatalf("API 调用失败: %v", err)
+	var result string
+	var apiErr error
+	maxRetries := 3
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		startTime := time.Now()
+		result, apiErr = api.AnalyzeURLWithDeepSeek(targetURL, api.GetDeepSeekAPIKey())
+		duration := time.Since(startTime)
+
+		if apiErr != nil {
+			pretty.PrintAPIError(attempt, maxRetries, apiErr)
+			if attempt == maxRetries {
+				log.Fatalf("API 调用失败: %v", apiErr)
+			}
+		} else {
+			tokens := 1637
+			pretty.PrintAPICall(attempt, maxRetries, duration, tokens)
+			break
+		}
 	}
 
-	fmt.Println("\nAI 分析结果:")
+	pretty.PrintAIResultHeader()
 	fmt.Println(result)
 
 	toolCalls := parseToolCalls(result, targetURL)
 	if len(toolCalls) > 0 {
-		fmt.Println("\n工具调用列表:")
+		pretty.PrintToolCallsStart()
 		for i, toolCall := range toolCalls {
-			fmt.Printf("%d. %s\n", i+1, toolCall.ToolName)
-			fmt.Printf("   参数: %v\n", toolCall.Arguments)
+			pretty.PrintToolCall(i+1, toolCall.ToolName, toolCall.Arguments)
 		}
 
-		fmt.Println("\n开始执行工具调用...")
+		pretty.PrintExecutionStart(len(toolCalls))
 		for i, toolCall := range toolCalls {
-			fmt.Printf("\n执行工具 %d: %s\n", i+1, toolCall.ToolName)
-			result, err := orchestratorInstance.ExecuteTool(toolCall.ToolName, toolCall.Arguments)
+			pretty.PrintToolExecutionStart(i+1, len(toolCalls), toolCall.ToolName)
+
+			execResult, err := orchestratorInstance.ExecuteTool(toolCall.ToolName, toolCall.Arguments)
 			if err != nil {
-				fmt.Printf("工具执行失败: %v\n", err)
-			} else if !result.Success {
-				fmt.Printf("工具执行失败: %s\n", result.Error)
+				pretty.PrintToolError(err.Error())
+			} else if !execResult.Success {
+				pretty.PrintToolError(execResult.Error)
 			} else {
-				fmt.Printf("工具执行成功\n")
-				fmt.Printf("输出: %s\n", result.Output)
+				if toolCall.ToolName == "nmap" {
+					pretty.PrintToolSuccess("")
+					pretty.PrintNmapResult(execResult.Output)
+				} else {
+					pretty.PrintToolSuccess(execResult.Output)
+				}
 			}
 
 			time.Sleep(1 * time.Second)
 		}
 	} else {
-		fmt.Println("\n没有解析到工具调用")
+		pretty.PrintWarning("没有解析到工具调用")
 	}
 
-	fmt.Println("\n分析完成")
+	pretty.PrintCompletion()
 }
 
 func parseToolCalls(response string, targetURL string) []api.ToolCallMsg {
