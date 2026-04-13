@@ -446,8 +446,6 @@ func (wm *WorkflowManager) extractDomain(target string) string {
 	return target
 }
 
-// buildTargetURL 构建完整的目标URL
-// 如果目标已经是完整URL则直接返回，否则默认添加 http:// 前缀
 func (wm *WorkflowManager) buildTargetURL(target string) string {
 	if target == "" {
 		return ""
