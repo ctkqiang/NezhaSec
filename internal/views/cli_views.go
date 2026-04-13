@@ -3,10 +3,10 @@ package views
 import (
 	"context"
 	"fmt"
+	"nezha_sec/internal/orchestrator"
+	"os"
 	"strings"
 	"time"
-
-	"nezha_sec/internal/orchestrator"
 
 	"github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/bubbles/spinner"
@@ -14,19 +14,20 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/joho/godotenv"
 )
 
 const (
-	ColorPrimary       = lipgloss.Color("#6366f1")
-	ColorSecondary     = lipgloss.Color("#8b5cf6")
-	ColorSuccess       = lipgloss.Color("#10b981")
-	ColorWarning       = lipgloss.Color("#f59e0b")
-	ColorError         = lipgloss.Color("#ef4444")
-	ColorInfo          = lipgloss.Color("#3b82f6")
-	ColorBackground    = lipgloss.Color("#1e1e2e")
-	ColorSurface       = lipgloss.Color("#313244")
-	ColorText          = lipgloss.Color("#cdd6f4")
-	ColorMuted         = lipgloss.Color("#6c7086")
+	ColorPrimary    = lipgloss.Color("#6366f1")
+	ColorSecondary  = lipgloss.Color("#8b5cf6")
+	ColorSuccess    = lipgloss.Color("#10b981")
+	ColorWarning    = lipgloss.Color("#f59e0b")
+	ColorError      = lipgloss.Color("#ef4444")
+	ColorInfo       = lipgloss.Color("#3b82f6")
+	ColorBackground = lipgloss.Color("#1e1e2e")
+	ColorSurface    = lipgloss.Color("#313244")
+	ColorText       = lipgloss.Color("#cdd6f4")
+	ColorMuted      = lipgloss.Color("#6c7086")
 )
 
 type LogEntry struct {
@@ -43,15 +44,15 @@ type CLIWorkflowModel struct {
 
 	targetInput textinput.Model
 
-	spinner spinner.Model
-	prog    progress.Model
+	spinner       spinner.Model
+	prog          progress.Model
 	secondaryProg progress.Model
 
 	viewport viewport.Model
 
-	state           string
-	currentPhase    string
-	progressPercent float64
+	state                    string
+	currentPhase             string
+	progressPercent          float64
 	secondaryProgressPercent float64
 
 	logs      []LogEntry
@@ -60,10 +61,23 @@ type CLIWorkflowModel struct {
 
 	config map[string]interface{}
 
-	totalPhases int
+	totalPhases       int
 	currentPhaseIndex int
 
 	messageChan chan interface{}
+}
+
+func getAppName() string {
+	_ = godotenv.Load(".env")
+	appName := os.Getenv("APP_NAME")
+	if appName == "" {
+		appName = "哪吒网络安全分析器"
+	}
+	return appName
+}
+
+func getAuthor() string {
+	return "钟智强"
 }
 
 func NewCLIWorkflowModel(orchestrator *orchestrator.Orchestrator) (CLIWorkflowModel, error) {
@@ -90,20 +104,20 @@ func NewCLIWorkflowModel(orchestrator *orchestrator.Orchestrator) (CLIWorkflowMo
 	targetInput.Focus()
 
 	return CLIWorkflowModel{
-		orchestrator:           orchestrator,
-		workflowManager:        workflowManager,
-		messageChan:            messageChan,
-		targetInput:            targetInput,
-		spinner:                spinner,
-		prog:                   prog,
-		secondaryProg:          secondaryProg,
-		viewport:               viewport,
-		state:                  "input",
-		logs:                   []LogEntry{},
-		errors:                 []string{},
-		successes:              []string{},
-		totalPhases:            7,
-		currentPhaseIndex:      0,
+		orchestrator:      orchestrator,
+		workflowManager:   workflowManager,
+		messageChan:       messageChan,
+		targetInput:       targetInput,
+		spinner:           spinner,
+		prog:              prog,
+		secondaryProg:     secondaryProg,
+		viewport:          viewport,
+		state:             "input",
+		logs:              []LogEntry{},
+		errors:            []string{},
+		successes:         []string{},
+		totalPhases:       7,
+		currentPhaseIndex: 0,
 		config: map[string]interface{}{
 			"aggressive": false,
 			"timeout":    300,
@@ -338,7 +352,8 @@ func (m CLIWorkflowModel) View() string {
 	subtitleStyle := lipgloss.NewStyle().Foreground(ColorMuted)
 	phaseStyle := lipgloss.NewStyle().Foreground(ColorSecondary).Bold(true)
 
-	header := headerStyle.Render("🔐 哪吒网络安全分析器 - 红队工作流")
+	appName := getAppName()
+	header := headerStyle.Render(fmt.Sprintf("%s - 红队工作流", appName))
 
 	content := ""
 	switch m.state {
@@ -362,10 +377,10 @@ func (m CLIWorkflowModel) viewInputState(titleStyle, subtitleStyle lipgloss.Styl
 		Padding(2, 3).
 		Background(ColorBackground)
 
-	title := titleStyle.Render("🎯 目标设置")
+	title := titleStyle.Render("[+] 目标设置")
 	subtitle := subtitleStyle.Render("请输入目标 URL 或 IP 地址")
 	input := m.targetInput.View()
-	footer := subtitleStyle.Render("ENTER 开始 • ESC 退出")
+	footer := subtitleStyle.Render("ENTER 开始 | ESC 退出")
 
 	return boxStyle.Render(fmt.Sprintf(
 		"%s\n%s\n\n%s\n\n%s\n\n%s",
@@ -388,32 +403,32 @@ func (m CLIWorkflowModel) viewRunningState(titleStyle, subtitleStyle, phaseStyle
 
 	result.WriteString(fmt.Sprintf("%s %s\n\n", m.spinner.View(), phaseStyle.Render("当前阶段: "+m.currentPhase)))
 
-	result.WriteString(titleStyle.Render("📊 整体进度") + "\n")
+	result.WriteString(titleStyle.Render("[*] 整体进度") + "\n")
 	result.WriteString(m.prog.ViewAs(m.progressPercent) + "\n\n")
 
-	result.WriteString(titleStyle.Render("⚡ 当前阶段进度") + "\n")
+	result.WriteString(titleStyle.Render("[*] 当前阶段进度") + "\n")
 	result.WriteString(m.secondaryProg.ViewAs(m.secondaryProgressPercent) + "\n\n")
 
-	result.WriteString(titleStyle.Render("📋 执行日志") + "\n")
+	result.WriteString(titleStyle.Render("[+] 执行日志") + "\n")
 	result.WriteString(m.viewport.View() + "\n")
 
 	if len(m.successes) > 0 {
 		successStyle := lipgloss.NewStyle().Foreground(ColorSuccess)
-		result.WriteString("\n" + titleStyle.Render("✅ 成功信息") + "\n")
+		result.WriteString("\n" + titleStyle.Render("[OK] 成功信息") + "\n")
 		for _, success := range m.successes {
-			result.WriteString(successStyle.Render("  ✓ "+success) + "\n")
+			result.WriteString(successStyle.Render("  [OK] "+success) + "\n")
 		}
 	}
 
 	if len(m.errors) > 0 {
 		errorStyle := lipgloss.NewStyle().Foreground(ColorError)
-		result.WriteString("\n" + titleStyle.Render("❌ 错误信息") + "\n")
+		result.WriteString("\n" + titleStyle.Render("[ERR] 错误信息") + "\n")
 		for _, err := range m.errors {
-			result.WriteString(errorStyle.Render("  ✗ "+err) + "\n")
+			result.WriteString(errorStyle.Render("  [ERR] "+err) + "\n")
 		}
 	}
 
-	footer := subtitleStyle.Render("P 暂停 • CTRL+C 退出")
+	footer := subtitleStyle.Render("P 暂停 | CTRL+C 退出")
 	result.WriteString("\n" + footer)
 
 	return boxStyle.Render(result.String())
@@ -426,16 +441,16 @@ func (m CLIWorkflowModel) viewPausedState(titleStyle, subtitleStyle lipgloss.Sty
 		Padding(2, 3).
 		Background(ColorBackground)
 
-	title := titleStyle.Render("⏸️  工作流已暂停")
+	title := titleStyle.Render("[PAUSE] 工作流已暂停")
 	phase := subtitleStyle.Render("当前阶段: " + m.currentPhase)
 
 	var result strings.Builder
 	result.WriteString(fmt.Sprintf("%s\n%s\n\n", title, phase))
 	result.WriteString(m.prog.ViewAs(m.progressPercent) + "\n\n")
-	result.WriteString(titleStyle.Render("📋 执行日志") + "\n")
+	result.WriteString(titleStyle.Render("[+] 执行日志") + "\n")
 	result.WriteString(m.viewport.View() + "\n")
 
-	footer := subtitleStyle.Render("P 恢复 • CTRL+C 退出")
+	footer := subtitleStyle.Render("P 恢复 | CTRL+C 退出")
 	result.WriteString("\n" + footer)
 
 	return boxStyle.Render(result.String())
@@ -457,39 +472,39 @@ func (m CLIWorkflowModel) viewCompletedState(titleStyle, subtitleStyle lipgloss.
 			Background(ColorBackground)
 	}
 
-	title := titleStyle.Render("✅ 工作流执行完成")
+	title := titleStyle.Render("[OK] 工作流执行完成")
 
 	var result strings.Builder
 	result.WriteString(title + "\n\n")
-	result.WriteString(titleStyle.Render("📊 最终进度") + "\n")
+	result.WriteString(titleStyle.Render("[*] 最终进度") + "\n")
 	result.WriteString(m.prog.ViewAs(m.progressPercent) + "\n\n")
-	result.WriteString(titleStyle.Render("📋 执行日志") + "\n")
+	result.WriteString(titleStyle.Render("[+] 执行日志") + "\n")
 	result.WriteString(m.viewport.View() + "\n")
 
 	if len(m.successes) > 0 {
 		successStyle := lipgloss.NewStyle().Foreground(ColorSuccess)
-		result.WriteString("\n" + titleStyle.Render("✅ 成功信息") + "\n")
+		result.WriteString("\n" + titleStyle.Render("[OK] 成功信息") + "\n")
 		for _, success := range m.successes {
-			result.WriteString(successStyle.Render("  ✓ "+success) + "\n")
+			result.WriteString(successStyle.Render("  [OK] "+success) + "\n")
 		}
 	}
 
 	if len(m.errors) > 0 {
 		errorStyle := lipgloss.NewStyle().Foreground(ColorError)
-		result.WriteString("\n" + titleStyle.Render("❌ 错误信息") + "\n")
+		result.WriteString("\n" + titleStyle.Render("[ERR] 错误信息") + "\n")
 		for _, err := range m.errors {
-			result.WriteString(errorStyle.Render("  ✗ "+err) + "\n")
+			result.WriteString(errorStyle.Render("  [ERR] "+err) + "\n")
 		}
 	}
 
-	footer := subtitleStyle.Render("C 重新开始 • CTRL+C 退出")
+	footer := subtitleStyle.Render("C 重新开始 | CTRL+C 退出")
 	result.WriteString("\n" + footer)
 
 	return boxStyle.Render(result.String())
 }
 
 func (m CLIWorkflowModel) createSeparator() string {
-	return lipgloss.NewStyle().Foreground(ColorSurface).Render("╶" + strings.Repeat("─", 50) + "╴")
+	return lipgloss.NewStyle().Foreground(ColorSurface).Render("-" + strings.Repeat("-", 50) + "-")
 }
 
 type WorkflowPhaseMsg struct {
