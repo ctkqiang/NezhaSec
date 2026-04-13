@@ -31,10 +31,7 @@ jobs:
             goos: darwin
             goarch: arm64
             suffix: ''
-          - os: windows-latest
-            goos: windows
-            goarch: amd64
-            suffix: '.exe'
+
 
     steps:
       - name: Checkout code
