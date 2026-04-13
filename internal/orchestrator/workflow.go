@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net/url"
 	"nezha_sec/internal/model"
+	"strings"
 	"time"
 )
 
@@ -257,7 +259,7 @@ func (wm *WorkflowManager) executeVulnerabilityScan(ctx context.Context) error {
 	}
 
 	sqlmapArgs := map[string]interface{}{
-		"url":   wm.state.Target,
+		"url":   wm.buildTargetURL(wm.state.Target),
 		"crawl": 2,
 		"risk":  1,
 		"level": 1,
@@ -285,7 +287,7 @@ func (wm *WorkflowManager) executeExploitation(ctx context.Context) error {
 	}
 
 	commixArgs := map[string]interface{}{
-		"url":   wm.state.Target,
+		"url":   wm.buildTargetURL(wm.state.Target),
 		"level": 1,
 	}
 	commixResult, err := wm.orchestrator.ExecuteTool("commix", commixArgs)
@@ -442,4 +444,23 @@ func (wm *WorkflowManager) shouldSkipNextPhases() bool {
 
 func (wm *WorkflowManager) extractDomain(target string) string {
 	return target
+}
+
+// buildTargetURL 构建完整的目标URL
+// 如果目标已经是完整URL则直接返回，否则默认添加 http:// 前缀
+func (wm *WorkflowManager) buildTargetURL(target string) string {
+	if target == "" {
+		return ""
+	}
+
+	if strings.HasPrefix(target, "http://") || strings.HasPrefix(target, "https://") {
+		return target
+	}
+
+	parsedURL, err := url.Parse("http://" + target)
+	if err != nil {
+		return "http://" + target
+	}
+
+	return parsedURL.String()
 }
