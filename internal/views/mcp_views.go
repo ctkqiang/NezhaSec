@@ -209,6 +209,30 @@ func (m MCPModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cancelFunc = cancel
 
 				return m, tea.Batch(m.Spinner.Tick, api.CallDeepSeekAPIWithContext(ctx, m.targetInput.Value()))
+			} else if m.State == model.StateConfirmation {
+				m.Steps = append(m.Steps, "用户确认执行工具调用")
+				m.State = model.StateThinking
+
+				if len(m.pendingToolCalls) > 0 {
+					return m, executeToolCallMCP(&m, m.pendingToolCalls[0])
+				}
+				return m, nil
+			}
+		case "y", "yes":
+			if m.State == model.StateConfirmation {
+				m.Steps = append(m.Steps, "用户确认执行工具调用")
+				m.State = model.StateThinking
+
+				if len(m.pendingToolCalls) > 0 {
+					return m, executeToolCallMCP(&m, m.pendingToolCalls[0])
+				}
+				return m, nil
+			}
+		case "n":
+			if m.State == model.StateConfirmation {
+				m.Steps = append(m.Steps, "用户取消执行工具调用")
+				m.State = model.StateResult
+				return m, nil
 			}
 		case "p":
 			if m.State == model.StateThinking {

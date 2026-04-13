@@ -81,9 +81,11 @@ func main() {
 	var targetURL string
 	var processMode bool
 	var mcpMode bool
+	var workflowMode bool
 	flag.StringVar(&targetURL, "u", "", "目标 URL 或 IP 地址")
 	flag.BoolVar(&processMode, "process", false, "处理输出模式")
 	flag.BoolVar(&mcpMode, "mcp", false, "使用 MCP 风格界面")
+	flag.BoolVar(&workflowMode, "workflow", false, "使用红队工作流模式")
 	flag.Parse()
 
 	if processMode {
@@ -105,10 +107,33 @@ func main() {
 				log.Fatalf("启动程序失败: %v", err)
 			}
 			return
+		} else if workflowMode {
+			toolRegistry, err := registry.NewToolRegistry()
+			if err != nil {
+				log.Fatalf("初始化工具注册表失败: %v", err)
+			}
+
+			orchestratorInstance, err := orchestrator.NewOrchestrator(toolRegistry)
+			if err != nil {
+				log.Fatalf("初始化调度器失败: %v", err)
+			}
+
+			model, err := views.NewCLIWorkflowModel(orchestratorInstance)
+			if err != nil {
+				log.Fatalf("初始化 CLI 工作流模型失败: %v", err)
+			}
+
+			p := tea.NewProgram(model)
+
+			if err := p.Start(); err != nil {
+				log.Fatalf("启动程序失败: %v", err)
+			}
+			return
 		} else {
 			fmt.Println("请使用 -u 参数指定目标 URL 或 IP 地址")
 			fmt.Println("例如: ./nezha_sec -u https://example.com")
 			fmt.Println("或使用 -mcp 参数启动 MCP 风格界面")
+			fmt.Println("或使用 -workflow 参数启动红队工作流模式")
 			return
 		}
 	}

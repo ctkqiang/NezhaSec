@@ -129,3 +129,7 @@ func (o *Orchestrator) CompleteAnalysis() api.ProgressMsg {
 	o.state = "completed"
 	return api.ProgressMsg("分析完成")
 }
+
+func (o *Orchestrator) NewWorkflowManager() *WorkflowManager {
+	return NewWorkflowManager(o)
+}
